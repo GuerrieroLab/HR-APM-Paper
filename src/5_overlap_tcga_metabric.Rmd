@@ -1,0 +1,208 @@
+---
+title: "5. Looking into the overlap between the clusters"
+output: html_notebook
+---
+
+## Initial setup
+
+### Load libraries
+```{r}
+suppressPackageStartupMessages({
+  library(qvalue)
+  library(org.Hs.eg.db)
+})
+```
+
+### Load data
+```{r}
+obj_dir <- "~/Dropbox (HMS)/_projects_/B06 03 HR-APM/data/RData"
+
+load(file=file.path(obj_dir,"gene_list.rda")) # gene.sig,category,hallmarks
+tcga.clust.gns <- readRDS(file=file.path(obj_dir,"tcga.clust.gns.rds"))
+meta.clust.gns <- readRDS(file=file.path(obj_dir,"meta.clust.gns.rds"))
+used.gns <- readRDS(file=file.path(obj_dir,"common_sig_gns.rds"))
+
+tcga.esr <- tcga.clust.gns[[7]]
+tcga.esr2 <- tcga.clust.gns[[4]]
+tcga.apm.tc <- tcga.clust.gns[[3]]
+meta.esr <- meta.clust.gns[[7]]
+meta.esr2 <- meta.clust.gns[[5]]
+meta.apm.tc <- unlist(meta.clust.gns[c(2,4)])
+```
+
+## Identify clusters that contain hallmarks
+```{r}
+sapply(hallmarks,function(x)grep(x,tcga.clust.gns))
+sapply(hallmarks,function(x)grep(x,meta.clust.gns))
+
+names(tcga.clust.gns) <- c(1:2,"3(apm.tc)",4:6,"7(esr)",8:9)
+names(meta.clust.gns) <- c(1,"2(hlaa)",3,"4(apm.tc)",5:6,"7(esr)",8:9)
+```
+
+```{r}
+if(0){
+	nlps <- sapply(tcga.clust.gns,function(x){
+		sapply(meta.clust.gns,function(y){
+			tmp <- table(used.gns %in% x,used.gns %in% y)[c("TRUE","FALSE"),c("TRUE","FALSE")]
+			nlp <- -log10(fisher.test(tmp,alternative="greater")$p.value)
+		})
+	})
+
+	round(nlps)
+}
+```
+
+## Identify signature genes in both TCGA and METABRIC
+```{r}
+esr.gns <- unique(c(tcga.esr,meta.esr))
+esr2.gns <- unique(c(tcga.esr2,meta.esr2))
+apm.tc.gns <- unique(c(tcga.apm.tc,meta.apm.tc))
+
+mm1 <- sapply(list(tcga.apm.tc,meta.apm.tc),function(x)apm.tc.gns %in% x)
+colnames(mm1) <- c("TCGA","METABRIC")
+comm.apm.tc <- apm.tc.gns[which(rowSums(mm1)==2)]
+
+mm2 <- sapply(list(tcga.esr,meta.esr),function(x)esr.gns %in% x)
+colnames(mm2) <- c("TCGA","METABRIC")
+comm.esr <- esr.gns[which(rowSums(mm2)==2)]
+
+mm3 <- sapply(list(tcga.esr2,meta.esr2),function(x)esr2.gns %in% x)
+colnames(mm3) <- c("TCGA","METABRIC")
+comm.esr2 <- esr2.gns[which(rowSums(mm3)==2)]
+```
+
+### Assess statistical significance between TCGA and METABRIC 
+```{r}
+p1 <- fisher.test(matrix(c(135,19,66,778-(135+19+66)),ncol=2),alternative="greater")$p.value
+p2 <- fisher.test(matrix(c(28,41,27,778-(28+41+27)),ncol=2),alternative="greater")$p.value
+p3 <- fisher.test(matrix(c(112,29,39,778-(112+29+39)),ncol=2),alternative="greater")$p.value
+
+par(mar=c(0,0,0,0))
+limma::vennDiagram(mm1,main="")
+box()
+mtext("APM/TC panel",side=3,line=-5)
+mtext(paste0("P-value:",signif(p1,digits=2)," (Fisher's exact test)"),side=1,line=-5)
+
+par(mar=c(0,0,0,0))
+limma::vennDiagram(mm2,main="")
+box()
+mtext("ESR panel",side=3,line=-5)
+mtext(paste0("P-value:",signif(p2,digits=2)," (Fisher's exact test)"),side=1,line=-5)
+
+par(mar=c(0,0,0,0))
+limma::vennDiagram(mm3,main="")
+box()
+mtext("ESR (2nd) panel",side=3,line=-5)
+mtext(paste0("P-value:",signif(p3,digits=2)," (Fisher's exact test)"),side=1,line=-5)
+```
+
+### Save objects
+```{r}
+if(0){
+  ## common signatures
+  save(comm.apm.tc,comm.esr,comm.esr2,file=file.path(obj_dir,"common_signatures.rda"))
+}
+```
+
+### Load common gene signatures 
+```{r}
+load(file=file.path(obj_dir,"tcga_metabric_signature.rda"))
+load(file=file.path(obj_dir,"gene_list.rda")) # apm.gns,tc.gns,esr.gns
+```
+
+## Barplots
+```{r}
+par(mar=c(5,5,4,1))
+barplot(sapply(tcga.clust.gns,function(x){
+	sum(x %in% unlist(esr.gns))/length(x)
+}),main="TCGA",las=2)  # 2
+
+barplot(sapply(meta.clust.gns,function(x){
+	sum(x %in% unlist(esr.gns))/length(x)
+}),main="TCGA",las=2)  # 9
+```
+## Pathway enrichment analysis
+### Load pathways in msigdb v6.1
+```{r}
+load(file.path(obj_dir,"msigdb_v6.1.rda"))
+
+keggs <- msigdb[grep("^KEGG_",names(msigdb))]
+gos <- msigdb[grep("^GO_",names(msigdb))]
+```
+
+### Filter pathways based on `used.genes` and the size of `gene sets`
+```{r}
+tested.gns <- readRDS(file=file.path(obj_dir,"common_tested_gns.rds"))
+
+kg <- msigdb[sub("_.+","",names(msigdb)) %in% c("HALLMARK","GO","KEGG","REACTOME","BIOCARTA")]
+barplot(sort(table(sub("_.+","",names(kg)))),las=2)
+
+kg.syms <- unlist(mget(unique(unlist(kg)),org.Hs.egSYMBOL,ifnotfound=NA))
+all.genes <- intersect(kg.syms,tested.gns) # 13321
+tab <- as.matrix(sort(table(sub("_.+","",names(kg))),decreasing=T))
+colnames(tab)[1] <- "# gene sets"
+
+kg.syms <- lapply(kg,function(x){
+	s <- unlist(mget(x,org.Hs.egSYMBOL,ifnotfound=NA))
+	s <- s[!is.na(s)]
+	s[s %in% all.genes]
+})
+
+ge10 <- sapply(kg.syms,length)>=20 & sapply(kg.syms,length) <= 500
+kg.syms <- kg.syms[ge10]
+
+all.genes <- intersect(unlist(kg.syms),tested.gns) # 14787 (all pathways)
+```
+
+### Compute significance of overlaps
+```{r}
+pvals.esr <- parallel::mclapply(kg.syms,function(x){
+	tab <- table(all.genes %in% comm.esr, all.genes %in% x)[c("TRUE","FALSE"),c("TRUE","FALSE")]
+	pval <- (fisher.test(tab,alternative="greater")$p.value)
+},mc.cores=6)
+
+pvals.esr2 <- parallel::mclapply(kg.syms,function(x){
+	tab <- table(all.genes %in% esr2, all.genes %in% x)[c("TRUE","FALSE"),c("TRUE","FALSE")]
+	pval <- (fisher.test(tab,alternative="greater")$p.value)
+},mc.cores=6)
+
+pvals.apm.tc <- parallel::mclapply(kg.syms,function(x){
+	tab <- table(all.genes %in% comm.apm.tc, all.genes %in% x)[c("TRUE","FALSE"),c("TRUE","FALSE")]
+	pval <- (fisher.test(tab,alternative="greater")$p.value)
+},mc.cores=6)
+```
+
+### FDR-adjusted p-values
+```{r}
+nlqs.esr <- -log10(qvalue(unlist(pvals.esr))$qvalue)
+nlqs.esr <- nlqs.esr[nlqs.esr > -log10(0.05)]
+par(mar=c(5,30,5,1))
+barplot(sort(nlqs.esr),horiz=T,col="steelblue",las=1,xlab="-log10(P-value, adusted)",
+	main="Pathways enriched in ESR gene panel",
+	cex.names=.7)	
+# head(sort(nlqs.esr,decreasing=T),20)
+
+nlqs.esr2 <- -log10(qvalue(unlist(pvals.esr2))$qvalue)
+nlqs.esr2 <- nlqs.esr2[nlqs.esr2 > -log10(0.05)]
+par(mar=c(5,30,5,1))
+barplot(rev(head(sort(nlqs.esr2,decreasing=T),20)),
+	horiz=T,col="steelblue",las=1,xlab="-log10(P-value, adusted)",
+	main="Pathways enriched in ESR2 gene panel",
+	cex.names=.7)
+# head(sort(nlqs.esr2,decreasing=T),20)
+
+nlqs.apm.tc <- -log10(qvalue(unlist(pvals.apm.tc))$qvalue)
+nlqs.apm.tc <- -log10(qvalue(unlist(pvals.apm.tc))$qvalue)
+nlqs.apm.tc <- nlqs.apm.tc[nlqs.apm.tc > -log10(0.05)]
+par(mar=c(5,30,5,1))
+barplot(rev(head(sort(nlqs.apm.tc,decreasing=T),20)),
+	horiz=T,col="steelblue",las=1,xlab="-log10(P-value, adusted)",
+	main="Pathways enriched in APM/TC gene panel",
+	cex.names=.7)
+# head(sort(nlqs.apm.tc,decreasing=T),20)
+```
+## Save data in an rda
+```{r}
+save.image(file.path(obj_dir,"tmp_080322.rda"))
+```
+
