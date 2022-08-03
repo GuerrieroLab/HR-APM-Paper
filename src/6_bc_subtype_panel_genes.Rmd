@@ -37,6 +37,8 @@ tcga.exp <- tcga.m3[match(comm.gns,tcga.syms),] # 778 genes, 1093 samples
 rownames(tcga.exp) <- comm.gns
 
 tcga.sp <- list()
+smpl.class <- names(tcga.ids)
+
 for(cl in smpl.class){
 	used.ids <- tcga.ids[[cl]]
 	tcga.exp.sub <- tcga.exp[,used.ids]
@@ -52,7 +54,6 @@ rownames(tcga.exp) <- comm.gns
 lcol <- brewer.pal(3,"Set1")[(comm.gns %in% comm.esr)+1]
 
 ## sutypes
-smpl.class <- names(tcga.ids)
 hc <- function(x)hclust(x,method="complete")
 
 for(cl in smpl.class){
@@ -74,6 +75,8 @@ rownames(meta.exp) <- comm.gns
 
 ## sutypes
 meta.sp <- list()
+smpl.class <- names(meta.ids)
+
 for(cl in smpl.class){
 	used.ids <- meta.ids[[cl]]
 	meta.exp.sub <- meta.exp[,used.ids]
@@ -89,7 +92,6 @@ rownames(tcga.exp) <- comm.gns
 lcol <- brewer.pal(3,"Set1")[(comm.gns %in% comm.esr)+1]
 
 ## sutypes
-smpl.class <- names(meta.ids)
 hc <- function(x)hclust(x,method="complete")
 
 for(cl in smpl.class){
@@ -163,6 +165,10 @@ dev.off()
 png(file.path(fig_dir,"tcga_between_cor.png"),width=400,height=700)
 plot.cor(tcga.between,title="TCGA",ylab="Inter-cluster correlation coefficients (ESR vs APM/TC)")
 dev.off()
+
+plot.cor(tcga.esr,title="TCGA",ylab="Intra-cluster correlation coefficients (ESR)")
+plot.cor(tcga.apm.tc,title="TCGA",ylab="Intra-cluster correlation coefficients (APM/TC)")
+plot.cor(tcga.between,title="TCGA",ylab="Inter-cluster correlation coefficients (ESR vs APM/TC)")
 ```
 
 ### T-test

@@ -154,8 +154,10 @@ myheatmap(tcga.sp1,k=9,side.cols=lcols)
 dev.off()
 
 png(file.path(fig_dir,"tcga_er_v2.png"),width=700,height=700)
-tcga.hc <- myheatmap(tcga.sp1,k=9,side.cols=lcols2)
+myheatmap(tcga.sp1,k=9,side.cols=lcols2)
 dev.off()
+myheatmap(tcga.sp1,k=9,side.cols=lcols)
+myheatmap(tcga.sp1,k=9,side.cols=lcols2)
 ```
 
 ## Cluster genes in TCGA
@@ -199,6 +201,9 @@ dev.off()
 png(file.path(fig_dir,"meta_er_v2.png"),width=700,height=700)
 meta.hc <- myheatmap(meta.sp1,k=9,side.cols=lcols2)
 dev.off()
+
+myheatmap(meta.sp1,k=9,side.cols=lcols)
+myheatmap(meta.sp1,k=9,side.cols=lcols2)
 ```
 
 ## Cluster genes in METABRIC
