@@ -2,3 +2,5 @@
 src_archive
 .Renviron
 .Rhistory
+.Rproj.user
+*.html
