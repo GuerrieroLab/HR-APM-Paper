@@ -4,3 +4,4 @@ src_archive
 .Rhistory
 .Rproj.user
 *.html
+*.Rproj
