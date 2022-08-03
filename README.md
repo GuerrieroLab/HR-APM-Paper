@@ -7,3 +7,4 @@ This repository contains code to explore anticorrelations between the ESR and AP
 3. Prepare METABRIC data - [3_metabric_prep.Rmd](src/3_metabric_prep.Rmd)
 4. Correlations in TCGA and METABRIC - [tcga_metabric_correlation.Rmd](src/tcga_metabric_correlation.Rmd)
 5. Looking into the overlap between the clusters - [overlap_tcga_metabric.Rmd](src/overlap_tcga_metabric.Rmd)
+6. Looking into the correlation in different cancer types - [bc_subtype_panel_genes.Rmd](src/bc_subtype_panel_genes.Rmd)
