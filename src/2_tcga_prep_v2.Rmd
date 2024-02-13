@@ -129,7 +129,8 @@ if(FALSE){
 
 ## Trim samples and genes
 Load clinincal data (disease status, treatment outcomes, and demographic data), format it into a data frame, standardize patient IDs and filter the data to only include patients who have corresponding gene expression data.
-## Load Clinical Data and Prepare for Analysis
+
+### Load Clinical Data and Prepare for Analysis
 ```{r}
 # Load and preprocess clinical data
 cl_path <- file.path(tcga_dir, "data_bcr_clinical_data_patient.txt")
