@@ -1,0 +1,250 @@
+---
+title: "2. Prepare TCGA data"
+output: html_notebook
+---
+
+## Initial setup
+
+### Load libraries
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(limma) # vennDiagram
+})
+```
+
+### Set paths
+```{r}
+# Define the main project directory
+proj_dir <- "~/Dropbox (HMS)/_projects_/B06 03 HR-APM/"
+
+# Define paths for figures, RData objects, and data storage
+fig_dir <- file.path(proj_dir, "manuscript", "figs")
+obj_dir <- file.path(proj_dir, "manuscript", "RData")
+data_dir <- file.path(proj_dir, "data")
+
+# TCGA data directory for breast cancer
+tcga_dir <- file.path(data_dir, "brca_tcga")
+
+```
+
+### Gene list
+```{r}
+# Load the gene signature, category, and hallmarks data prepared in a previous step
+x <- load(file = file.path(obj_dir, "1-4_prep", "gene_signature.rda")) 
+```
+
+## Load expresssion data (downloaded form cBioPortal)
+```{r}
+# Define file paths for expression matrices
+ma_fns <- file.path(tcga_dir, c(
+  "data_RNA_Seq_v2_expression_median.txt",
+  "data_RNA_Seq_v2_mRNA_median_Zscores.txt",
+  "data_RNA_Seq_v2_mRNA_median_all_sample_Zscores.txt"
+))
+
+# Read the expression matrices
+tcga_mat1 <- read.table(ma_fns[1], sep = "\t", header = TRUE)
+tcga_mat2 <- read.table(ma_fns[2], sep = "\t", header = TRUE)
+tcga_mat3 <- read.table(ma_fns[3], sep = "\t", header = TRUE)
+
+# Preview of the first matrix's top-left corner
+tcga_mat1[1:5, 1:5] # First two columns are Hugo Symbols and Entrez Gene IDs
+
+```
+
+### Check column names
+Column names of the three matrices are identical.
+```{r}
+# Ensure the column names (samples) are consistent across all matrices
+identical(colnames(tcga_mat1), colnames(tcga_mat2)) # Should return TRUE
+identical(colnames(tcga_mat1), colnames(tcga_mat3)) # Should return TRUE
+```
+
+## Pre-processing data
+### Compare three expression matrices
+
+```{r}
+# Create log2-transformed matrix from the raw expression values, adding 1 to avoid log(0)
+tcga_m1 <- log2(as.matrix(tcga_mat1[, -(1:2)]) + 1)
+rownames(tcga_m1) <- tcga_mat1$Hugo_Symbol # Genes whose expression is measured
+
+# Create matrices from Z-scores data
+tcga_m2 <- as.matrix(tcga_mat2[, -(1:2)])
+rownames(tcga_m2) <- tcga_mat2$Hugo_Symbol
+
+tcga_m3 <- as.matrix(tcga_mat3[, -(1:2)])
+rownames(tcga_m3) <- tcga_mat3$Hugo_Symbol
+
+# Check dimensions to ensure consistency
+dim(tcga_m1) # Should return 20531 genes by 1100 samples
+dim(tcga_m2) # Should return 20440 genes by 1100 samples
+dim(tcga_m3) # Should return 20531 genes by 1100 samples
+```
+
+### Check if mat1 and mat3 have identical gene sets
+```{r}
+# Validate that the gene sets in mat1 and mat3 are identical
+identical(tcga_mat1$Hugo_Symbol, tcga_mat3$Hugo_Symbol) # Should return TRUE
+```
+### Remove metastasized samples
+```{r}
+# Identify and remove metastasized samples based on their naming pattern (ending with '06')
+is_dup <- grepl("06$", colnames(tcga_m3)) # '01' indicates primary tumor; '06' indicates metastasis - 7/1100 samples are mestastasized
+
+# Remove metastasized samples from the matrices
+tcga_m1 <- tcga_m1[, !is_dup]
+tcga_m2 <- tcga_m2[, !is_dup]
+tcga_m3 <- tcga_m3[, !is_dup]
+
+# Rename the columns by removing the '.01' suffix from the sample names
+colnames(tcga_m1) <- colnames(tcga_m2) <- colnames(tcga_m3) <- sub("\\.01$", "", colnames(tcga_m3))
+```
+
+### Optional plotting of relationships between matrices
+The following code is optional and commented out. It generates plots for visual comparison between matrices. 
+```{r}
+if(FALSE){
+  syms12 <- intersect(tcga_mat1$Hugo_Symbol, tcga_mat2$Hugo_Symbol)
+  i <- 4 # Example index for demonstration purposes
+  pdf(file.path(fig_dir, "prep_tcga", "mat1vs2.pdf"), width = 7, height = 7)
+  plot(tcga_m1[match(syms12[i], tcga_mat1$Hugo_Symbol), ],
+       tcga_m2[match(syms12[i], tcga_mat2$Hugo_Symbol), ],
+       main = syms12[i], xlab = "M1", ylab = "M2", pch = 20)
+  dev.off()
+
+  pdf(file.path(fig_dir, "prep_tcga", "mat1vs3.pdf"), width = 7, height = 7)
+  plot(tcga_m1[match(syms12[i], tcga_mat1$Hugo_Symbol), ],
+       tcga_m3[match(syms12[i], tcga_mat3$Hugo_Symbol), ],
+       main = syms12[i], xlab = "M1", ylab = "M3", pch = 20)
+  dev.off()
+
+  pdf(file.path(fig_dir, "prep_tcga", "mat2vs3.pdf"), width = 7, height = 7)
+  plot(tcga_m2[match(syms12[i], tcga_mat2$Hugo_Symbol), ],
+       tcga_m3[match(syms12[i], tcga_mat3$Hugo_Symbol), ],
+       main = syms12[i], xlab = "M2", ylab = "M3", pch = 20)
+  dev.off()
+}
+```
+
+## Trim samples and genes
+Load clinincal data (disease status, treatment outcomes, and demographic data), format it into a data frame, standardize patient IDs and filter the data to only include patients who have corresponding gene expression data.
+## Load Clinical Data and Prepare for Analysis
+```{r}
+# Load and preprocess clinical data
+cl_path <- file.path(tcga_dir, "data_bcr_clinical_data_patient.txt")
+cl_data <- read.delim(cl_path, header = TRUE, skip = 4, stringsAsFactors = FALSE)
+cl_data$PATIENT_ID <- gsub("-", ".", cl_data$PATIENT_ID)
+
+# Filter clinical data to include only patients present in the gene expression data
+used_ids <- colnames(tcga_m3)
+tcga.clinical <- filter(cl_data, PATIENT_ID %in% used_ids) %>%
+	filter(ER_STATUS_BY_IHC %in% c("Positive","Negative")) %>%
+	filter(PR_STATUS_BY_IHC %in% c("Positive","Negative")) %>%
+	filter(IHC_HER2 %in% c("Positive","Negative"))
+
+# Extract patient IDs for each subtype based on ER, PR, and HER2 status
+tcga.ids <- list(
+  hr = tcga.clinical %>% 
+    filter((ER_STATUS_BY_IHC == "Positive" | PR_STATUS_BY_IHC == "Positive") & IHC_HER2 == "Negative") %>% 
+    pull(PATIENT_ID),
+  her2 = tcga.clinical %>% 
+    filter(ER_STATUS_BY_IHC == "Negative" & PR_STATUS_BY_IHC == "Negative" & IHC_HER2 == "Positive") %>% 
+    pull(PATIENT_ID),
+  dp = tcga.clinical %>% 
+    filter((ER_STATUS_BY_IHC == "Positive" | PR_STATUS_BY_IHC == "Positive") & IHC_HER2 == "Positive")%>% 
+    pull(PATIENT_ID),
+  tnbc = tcga.clinical %>% 
+    filter(ER_STATUS_BY_IHC == "Negative" & PR_STATUS_BY_IHC == "Negative" & IHC_HER2 == "Negative") %>% 
+    pull(PATIENT_ID)
+)
+```
+
+### Remove Redundant Genes and Retain Most Abundantly Expressed Variants
+```{r}
+# Assuming `tcga.m1` and `tcga.m3` have genes as row names and samples as column names
+
+# Create a function to remove redundant genes and retain the variant with the highest mean expression
+remove_redundant_genes <- function(expr_matrix, used_ids) {
+  # Calculate row means for the expression matrix, removing NA values
+  row_means <- rowMeans(expr_matrix, na.rm = TRUE)
+  
+  # Generate a vector of unique gene symbols
+  gene_symbols <- rownames(expr_matrix)
+  
+  # Apply a function over each gene symbol to find the index of the entry with the maximum mean expression
+  idx <- tapply(seq_along(row_means), gene_symbols, function(i) {
+    this_means <- row_means[i]
+    max_mean_idx <- which(this_means == max(this_means))
+    return(i[max_mean_idx])
+  }, simplify = TRUE)
+  
+  # Flatten the list to get a simple vector of indices (in case of multiple max means, take the first)
+  idx <- unlist(idx, use.names = FALSE)
+  
+  # Subset the expression matrix to include only selected indices
+  cleaned_matrix <- expr_matrix[idx, , drop = FALSE]
+  
+  # Ensure the matrix only includes samples present in the clinical data
+  cleaned_matrix <- cleaned_matrix[, used_ids, drop = FALSE]
+  
+  # Correct row names by ensuring only unique gene symbols are retained
+  cleaned_matrix_rownames <- names(row_means)[idx]
+  rownames(cleaned_matrix) <- cleaned_matrix_rownames[!duplicated(cleaned_matrix_rownames)]
+  
+  return(cleaned_matrix)
+}
+
+# Apply the function to your expression matrices
+tcga.m1.cleaned <- remove_redundant_genes(tcga.m1, used_ids)
+tcga.m3.cleaned <- remove_redundant_genes(tcga.m3, used_ids)
+
+```
+
+### Process Expression Data for Analysis
+```{r}
+# Assuming tcga_m1 and tcga_m3 matrices are already filtered to include relevant genes and samples
+
+# Extract unique gene symbols
+tcga.syms <- intersect(rownames(tcga_m1), rownames(tcga_m3))
+tcga.syms <- tcga.syms[!is.na(tcga.syms)]
+
+# Subsetting matrices to include only unique genes
+tcga_m1 <- tcga_m1[tcga.syms, ]
+tcga_m3 <- tcga_m3[tcga.syms, ]
+
+# Ensure matrices only include samples present in the clinical data
+tcga_m1 <- tcga_m1[, used_ids]
+tcga_m3 <- tcga_m3[, used_ids]
+```
+
+
+## Visualize Patient Subtypes with Venn Diagram
+```{r}
+# Prepare a matrix indicating subtype presence for each patient
+mm <- with(tcga.clinical, cbind(
+  `ER+` = ER_STATUS_BY_IHC == "Positive",
+  `PR+` = PR_STATUS_BY_IHC == "Positive",
+  `HER2+` = IHC_HER2 == "Positive"
+))
+
+# Convert logical values to numeric for vennDiagram compatibility
+mm <- as.data.frame(mm)
+mm[] <- lapply(mm, as.integer)
+rownames(mm) <- tcga.clinical$PATIENT_ID
+
+# Generate Venn diagram
+vennDiagram(as.matrix(mm), circle.col = c("blue", "red", "green"))
+
+pdf(file.path(fig_dir,"2_prep_tcga","tcga_brca_subtypes.pdf"),width=7,height=7)
+vennDiagram(mm,main="TCGA samples, by subtypes")
+dev.off()
+
+```
+
+## Save processed data
+```{r}
+# Save the relevant objects to a .rda file for easy loading in future analysis
+save(tcga.ids,tcga.clinical,tcga.syms,tcga_m1,tcga_m3,
+     file=file.path(obj_dir,"1-4_prep","tcga_processed_v4.rda"))
+```
