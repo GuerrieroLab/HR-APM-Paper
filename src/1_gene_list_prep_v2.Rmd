@@ -72,11 +72,9 @@ category[hallmarks] # TC hallmark genes CD8[AB] are in fact APM/TC
 ## Save the gene lists as an rda file
 
 ```{r}
-save(gene.sig,category,hallmarks,file=file.path(obj_dir,"1-4_prep","gene_signature.rda"))
-saveRDS(minn.gns,file=file.path(obj_dir,"1-4_prep","minn_ifnns.rda"))
+save(gene_sig,category,hallmarks,file=file.path(obj_dir,"1-4_prep","gene_signature.rda"))
 ```
-
-## Andy Minn's list
+## Andy Minn's list of IFN-related genes
 ```{r}
 # Read the IFN signature genes from the text file and format them into a matrix
 ifn_sigs_path <- file.path(data_dir, "gene_list", "ifn_sigs.txt")
