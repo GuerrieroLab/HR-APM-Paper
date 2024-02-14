@@ -1,5 +1,6 @@
 .DS_Store
 src_archive
+src_clin
 .Renviron
 .Rhistory
 .Rproj.user
