@@ -5,3 +5,5 @@ src_archive
 .Rproj.user
 *.html
 *.Rproj
+library
+*archive*
