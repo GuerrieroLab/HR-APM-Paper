@@ -197,8 +197,8 @@ remove_redundant_genes <- function(expr_matrix, used_ids) {
 }
 
 # Apply the function to your expression matrices
-tcga.m1.cleaned <- remove_redundant_genes(tcga.m1, used_ids)
-tcga.m3.cleaned <- remove_redundant_genes(tcga.m3, used_ids)
+tcga_m1 <- remove_redundant_genes(tcga.m1, used_ids)
+tcga_m3 <- remove_redundant_genes(tcga.m3, used_ids)
 
 ```
 
@@ -211,7 +211,7 @@ tcga.syms <- intersect(rownames(tcga_m1), rownames(tcga_m3))
 tcga.syms <- tcga.syms[!is.na(tcga.syms)]
 
 # Subsetting matrices to include only unique genes
-tcga_m1 <- tcga_m1[tcga.syms, ]
+tcga_m1 <- tcga.m1.cleaned[tcga.syms, ]
 tcga_m3 <- tcga_m3[tcga.syms, ]
 
 # Ensure matrices only include samples present in the clinical data
