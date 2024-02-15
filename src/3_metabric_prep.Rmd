@@ -11,6 +11,7 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(mclust)
   library(limma)
+  library(parallel)
 })
 ```
 
@@ -151,6 +152,12 @@ vennDiagram(cbind(
 	`HER2+`=(meta.clinical$HER2_STATUS=="Positive")),
 main="METABRIC samples")
 dev.off()
+
+vennDiagram(cbind(
+	`ER+`=(meta.clinical$ER_STATUS=="Positive"),
+	`PR+`=(meta.clinical$PR_STATUS=="Positive"),
+	`HER2+`=(meta.clinical$HER2_STATUS=="Positive")),
+main="METABRIC samples")
 ```
 
 ### Patient IDs per subtype
@@ -202,7 +209,7 @@ if(1){
   	her2=meta.her2.pos.ids,
   	dn=meta.dn.ids)
 }
-sapply(meta.ids,length)
+sapply(meta.ids,length) 
 ```
 
 <!-- ### Remove non-measured and impute them -->
@@ -222,6 +229,7 @@ sapply(meta.ids,length)
 <!-- ``` -->
 
 ## Redundant genes are removed - use only the most abundantly expressed ones
+
 ```{r}
 user.ids <- unlist(meta.ids)
 dim(meta.clinical)
@@ -299,7 +307,6 @@ if(0){
   abline(v=exp.th,col=2)
   dev.off()
 }
-
 ```
 
 ### Impute 10 NAs in mm1 with bg value (mean.x)
@@ -314,47 +321,121 @@ mm1[is.na(mm1)] <- mean.x
 has.0 <- apply(mm1,1,function(xx)sum(xx < exp.th))
 med.0 <- apply(mm1,1,function(xx)median(xx))
 
-if(0){
-  plot(has.0,med.0)
-  abline(h=exp.th,col=2)
-}
+plot(has.0,med.0,
+     xlab="# of samples whose expression is < exp.th (per gene)",
+     ylab="median expression (per gene)",
+     pch=20,col="grey70"
+     )
+abline(h=exp.th,col=2)
 ```
 
 ### Identify genes lacking expression artificially
 ```{r}
 mm1[is.na(mm1)] <- mean.x
-lst <- parallel::mclapply(uniq.syms1,function(sym){
-  this <- mm1[sym,]
-  
-  ## model selection
-  set.seed(1)
-  bic <- mclustBIC(this,G=1:2,modelNames="V",verbose=FALSE)
-  g <- which.max(bic)
-  mc <- Mclust(this,G=g,modelNames="V",verbose=FALSE)
-  mns <- mc$parameters$mean
+system.time({
+  lst <- parallel::mclapply(uniq.syms1,function(sym){
+    i <- match(sym,uniq.syms1)
+    if(i %% 1000 == 0){
+      cat("*")
+    }
+    this <- mm1[sym,]
     
-  if(g==1){
-    peaks <- c(mns,NA)
+    ## model selection
+    set.seed(1)
+    bic <- mclustBIC(this,G=1:2,modelNames="V",verbose=FALSE)
+    g <- which.max(bic)
+    mc <- Mclust(this,G=g,modelNames="V",verbose=FALSE)
+    mns <- mc$parameters$mean
+      
+    if(g==1){
+      peaks <- c(mns,NA)
+      is.between <- NA
+    }else if(g==2){
+      peaks <- sort(mns)
+      i <- which.min(mns)
+      max.min <- max(this[mc$classification==1])
+      is.between <- max.min > min(mns) && max.min < max(mns)
+    }
+    
+    is.bg <- min(mns) < exp.th
+    max.sig <- max(mns) > exp.th
+    
+    return(c(sym=sym,
+             g=g,
+             is.bg=is.bg,
+             sig=max.sig,
+             p1=peaks[1],
+             p2=peaks[2],
+             is.between=is.between
+             ))
+  },mc.cores=15)
+  saveRDS(lst,file=file.path(obj_dir,"1-4_prep","metabric_model_selection.rds"))
+})
+### alternative
+library(parallel)
+
+# Assuming 'mm1' is your matrix of gene expression data, 'uniq.syms1' contains unique gene symbols,
+# and 'exp.th' is your expression threshold.
+
+calc_wcss <- function(data) {
+  km1 <- kmeans(data, centers = 1, nstart = 25)
+  km2 <- kmeans(data, centers = 2, nstart = 25)
+  km <- list(km1,km2)
+  return(sapply(km, function(x) x$tot.withinss))
+}
+
+# Function to calculate simplified BIC-like score for k=1 and k=2
+calc_bic_like <- function(wcss, n, p) {
+  penalty <- log(n) * p
+  bic_like <- log(wcss) + penalty
+  return(bic_like)
+}
+
+# Parallel processing to evaluate each gene
+lst <- parallel::mclapply(uniq.syms1, function(sym, data=mm1, exp.th) {
+  this <- t(data[sym, , drop = FALSE])  # Ensure it's a matrix, even for a single row
+  n <- nrow(this)
+  
+  # Calculate WCSS for k=1 and k=2
+  wcss <- calc_wcss(this)
+  
+  # Number of parameters: k * number of dimensions - 1
+  p <- c(1, 2) * ncol(this) - 1
+  
+  # Calculate simplified BIC-like score
+  bic_like <- mapply(calc_bic_like, wcss, n, p)
+  
+  # Choose model with lower BIC-like score
+  g <- which.min(bic_like)
+  
+  # Additional calculations based on chosen g
+  if(g == 1) {
+    peaks <- NA
     is.between <- NA
-  }else if(g==2){
-    peaks <- sort(mns)
-    i <- which.min(mns)
-    max.min <- max(this[mc$classification==1])
-    is.between <- max.min > min(mns) && max.min < max(mns)
+  } else {
+    # Assume kmeans result for k=2 for peak identification
+    km2 <- kmeans(this, centers = 2, nstart = 25)
+    peaks <- sort(km2$centers)
+    is.between <- NA  # Define based on your criteria for 'is.between'
   }
   
-  is.bg <- min(mns) < exp.th
-  max.sig <- max(mns) > exp.th
+  is.bg <- min(peaks, na.rm = TRUE) < exp.th
+  max.sig <- max(peaks, na.rm = TRUE) > exp.th
   
-  return(c(sym=sym,
-           g=g,
-           is.bg=is.bg,
-           sig=max.sig,
-           p1=peaks[1],
-           p2=peaks[2],
-           is.between=is.between
-           ))
-},mc.cores=15)
+  return(c(sym = sym,
+           g = g,
+           is.bg = is.bg,
+           sig = max.sig,
+           p1 = peaks[1],
+           p2 = ifelse(length(peaks) > 1, peaks[2], NA),
+           is.between = is.between
+  ))
+}, mc.cores = detectCores() - 1, data = mm1, exp.th = exp.th)
+
+# Convert list to a data frame or another preferred structure for further analysis
+lst_df <- do.call(rbind, lst)
+
+
 
 ##
  lst1 <- as.data.frame(do.call(rbind,lst)) %>%
