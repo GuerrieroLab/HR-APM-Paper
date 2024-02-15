@@ -371,86 +371,22 @@ system.time({
   },mc.cores=15)
   saveRDS(lst,file=file.path(obj_dir,"1-4_prep","metabric_model_selection.rds"))
 })
-### alternative
-library(parallel)
+#     user   system  elapsed 
+# 1293.702   23.581   91.916 
 
-# Assuming 'mm1' is your matrix of gene expression data, 'uniq.syms1' contains unique gene symbols,
-# and 'exp.th' is your expression threshold.
-
-calc_wcss <- function(data) {
-  km1 <- kmeans(data, centers = 1, nstart = 25)
-  km2 <- kmeans(data, centers = 2, nstart = 25)
-  km <- list(km1,km2)
-  return(sapply(km, function(x) x$tot.withinss))
-}
-
-# Function to calculate simplified BIC-like score for k=1 and k=2
-calc_bic_like <- function(wcss, n, p) {
-  penalty <- log(n) * p
-  bic_like <- log(wcss) + penalty
-  return(bic_like)
-}
-
-# Parallel processing to evaluate each gene
-lst <- parallel::mclapply(uniq.syms1, function(sym, data=mm1, exp.th) {
-  this <- t(data[sym, , drop = FALSE])  # Ensure it's a matrix, even for a single row
-  n <- nrow(this)
-  
-  # Calculate WCSS for k=1 and k=2
-  wcss <- calc_wcss(this)
-  
-  # Number of parameters: k * number of dimensions - 1
-  p <- c(1, 2) * ncol(this) - 1
-  
-  # Calculate simplified BIC-like score
-  bic_like <- mapply(calc_bic_like, wcss, n, p)
-  
-  # Choose model with lower BIC-like score
-  g <- which.min(bic_like)
-  
-  # Additional calculations based on chosen g
-  if(g == 1) {
-    peaks <- NA
-    is.between <- NA
-  } else {
-    # Assume kmeans result for k=2 for peak identification
-    km2 <- kmeans(this, centers = 2, nstart = 25)
-    peaks <- sort(km2$centers)
-    is.between <- NA  # Define based on your criteria for 'is.between'
-  }
-  
-  is.bg <- min(peaks, na.rm = TRUE) < exp.th
-  max.sig <- max(peaks, na.rm = TRUE) > exp.th
-  
-  return(c(sym = sym,
-           g = g,
-           is.bg = is.bg,
-           sig = max.sig,
-           p1 = peaks[1],
-           p2 = ifelse(length(peaks) > 1, peaks[2], NA),
-           is.between = is.between
-  ))
-}, mc.cores = detectCores() - 1, data = mm1, exp.th = exp.th)
-
-# Convert list to a data frame or another preferred structure for further analysis
-lst_df <- do.call(rbind, lst)
-
-
-
-##
- lst1 <- as.data.frame(do.call(rbind,lst)) %>%
-  rename(p1="p1.1") %>%
-  rename(p2="p2.2") %>%
-  mutate(is.bg=as.logical(is.bg)) %>%
-  mutate(sig=as.logical(sig)) %>%  
-  mutate(is.between=as.logical(is.between)) %>%    
-  mutate(p1=as.numeric(p1)) %>%  
-  mutate(p2=as.numeric(p2))
+lst1 <- as.data.frame(do.call(rbind,lst)) %>%
+  rename(p1="p1.1",p2="p2.2") %>%
+  mutate(is.bg=as.logical(is.bg),
+    sig=as.logical(sig),
+    is.between=as.logical(is.between),
+    p1=as.numeric(p1),
+    p2=as.numeric(p2))
 
 df <- cbind(lst1,
             median=med.0,
             n.smpls.bg=has.0
             ) %>% mutate(d=p2-p1)
+
 df$is.between[is.na(df$is.between)] <- FALSE
 
 ## visual checking - if wanted
@@ -486,12 +422,11 @@ sig.df <- df1 %>%
   filter(n.smpls.bg < n.smpls * .25) %>%
   arrange(desc(d)) # 52
 
-df1 %>% filter(p.val == 0)
-boxplot(mm1["ESR1",] ~ sta,breaks=1000) # above thres
-boxplot(mm1["SCAMP1",] ~ sta,breaks=1000) # above thres
-abline(h=exp.th,col=2)
-
 if(0){
+  boxplot(mm1["ESR1",] ~ sta,breaks=1000) # above thres
+  boxplot(mm1["SCAMP1",] ~ sta,breaks=1000) # above thres
+  abline(h=exp.th,col=2)
+
   boxplot(mm1["AR",user.ids] ~ sta,las=2)
 
   ## thres for # bg samples
@@ -499,10 +434,10 @@ if(0){
   abline(v=n.smpls * .25,col=2)
 
   hist(sig.df$d,breaks=100)
-  hist(mm["ESR1",])
-  hist(mm["ANKRD30A",],breaks=1000)
-  hist(mm["AGR3",],breaks=1000)
-  hist(mm["GPT",],breaks=1000)
+  hist(mm1["ESR1",])
+  hist(mm1["ANKRD30A",],breaks=1000)
+  hist(mm1["AGR3",],breaks=1000)
+  hist(mm1["GPT",],breaks=1000)
 }
 ```
  
@@ -531,9 +466,8 @@ range(rowSums(is.na(mm3.0))) # 0-465
 range(colSums(is.na(mm3.0))) # 0-13
 
   ## we should use mm3 (zscore)
-mm3.2 <- impute::impute.knn(mm3.0,k=10)[[1]]
+meta.m3i <- mm3.2 <- impute::impute.knn(mm3.0,k=10)[[1]]
 
-meta.m3i <- mm3.2
 if(0){
   was.na <- is.na(mm3.1["HLA-A",])
   plot(mm3.2["CD8A",],mm3.2["HLA-A",],col=was.na+1)
@@ -561,7 +495,7 @@ if(0){
 }
 
 ```
-
+ 
 
 
 ## Save data in rda
