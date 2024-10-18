@@ -1,0 +1,155 @@
+---
+title: "2. Prepare TCGA data"
+# output: html_notebook
+---
+
+## Initial setup
+
+### Load libraries
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(limma) # vennDiagram
+})
+```
+
+## Load expresssion data (downloaded form cBioPortal)
+
+In the script below:
+- tcga_mat1: Raw expression values (log2-transformed) from RNA-Seq (data_RNA_Seq_v2_expression_median.txt)
+- tcga_mat2: Z-scores normalized for each gene relative to the cohort (data_RNA_Seq_v2_mRNA_median_Zscores.txt)
+- tcga_mat3: Z-scores normalized across all samples (data_RNA_Seq_v2_mRNA_median_all_sample_Zscores.txt)
+
+We use tcga_mat3 for the later analysis (see 04)
+
+```{r}
+ma_fns <- file.path(tcga_dir, c(
+  "data_RNA_Seq_v2_expression_median.txt",
+  "data_RNA_Seq_v2_mRNA_median_Zscores.txt",
+  "data_RNA_Seq_v2_mRNA_median_all_sample_Zscores.txt"
+))
+
+tcga_mat1 <- read.table(ma_fns[1], sep = "\t", header = TRUE)
+tcga_mat2 <- read.table(ma_fns[2], sep = "\t", header = TRUE)
+tcga_mat3 <- read.table(ma_fns[3], sep = "\t", header = TRUE)
+
+tcga_mat1[1:5, 1:5] # Preview of first matrix
+```
+
+### Check column names
+```{r}
+# Ensure the column names (samples) are consistent across all matrices
+identical(colnames(tcga_mat1), colnames(tcga_mat2)) # TRUE
+identical(colnames(tcga_mat1), colnames(tcga_mat3)) # TRUE
+```
+
+## Pre-processing data
+### Log-transform and matrix setup
+
+```{r}
+# Log-transform the matrix
+tcga_m1 <- log2(as.matrix(tcga_mat1[, -(1:2)]) + 1)
+rownames(tcga_m1) <- tcga_mat1$Hugo_Symbol 
+
+tcga_m2 <- as.matrix(tcga_mat2[, -(1:2)])
+rownames(tcga_m2) <- tcga_mat2$Hugo_Symbol
+
+tcga_m3 <- as.matrix(tcga_mat3[, -(1:2)])
+rownames(tcga_m3) <- tcga_mat3$Hugo_Symbol
+
+# Check dimensions to ensure consistency
+dim(tcga_m1) # 20531 genes, 1100 samples
+dim(tcga_m2) # 20440 genes, 1100 samples
+dim(tcga_m3) # 20531 genes, 1100 samples
+```
+
+### Check gene consistency between mat1 and mat3
+```{r}
+identical(tcga_mat1$Hugo_Symbol, tcga_mat3$Hugo_Symbol) # Should return TRUE
+```
+### Remove metastasized samples
+```{r}
+is_dup <- grepl("06$", colnames(tcga_m3)) # Identify metastasized samples
+tcga_m1 <- tcga_m1[, !is_dup]
+tcga_m2 <- tcga_m2[, !is_dup]
+tcga_m3 <- tcga_m3[, !is_dup]
+
+colnames(tcga_m1) <- colnames(tcga_m2) <- colnames(tcga_m3) <- sub("\\.01$", "", colnames(tcga_m3))
+```
+
+
+## Clinical data preparation
+### Load clinical data and match it to expression data
+```{r}
+cl_path <- file.path(tcga_dir, "data_bcr_clinical_data_patient.txt")
+cl_data <- read.delim(cl_path, header = TRUE, skip = 4, stringsAsFactors = FALSE)
+cl_data$PATIENT_ID <- gsub("-", ".", cl_data$PATIENT_ID)
+
+used_ids <- colnames(tcga_m3)
+tcga.clinical <- filter(cl_data, PATIENT_ID %in% used_ids) %>%
+	filter(ER_STATUS_BY_IHC %in% c("Positive","Negative")) %>%
+	filter(PR_STATUS_BY_IHC %in% c("Positive","Negative")) %>%
+	filter(IHC_HER2 %in% c("Positive","Negative"))
+
+tcga.ids <- list(
+  hr = tcga.clinical %>% filter((ER_STATUS_BY_IHC == "Positive" | PR_STATUS_BY_IHC == "Positive") & IHC_HER2 == "Negative") %>% pull(PATIENT_ID),
+  her2 = tcga.clinical %>% filter(ER_STATUS_BY_IHC == "Negative" & PR_STATUS_BY_IHC == "Negative" & IHC_HER2 == "Positive") %>% pull(PATIENT_ID),
+  dp = tcga.clinical %>% filter((ER_STATUS_BY_IHC == "Positive" | PR_STATUS_BY_IHC == "Positive") & IHC_HER2 == "Positive") %>% pull(PATIENT_ID),
+  tnbc = tcga.clinical %>% filter(ER_STATUS_BY_IHC == "Negative" & PR_STATUS_BY_IHC == "Negative" & IHC_HER2 == "Negative") %>% pull(PATIENT_ID)
+)
+```
+
+### Remove redundant genes
+```{r}
+used.ids <- tcga.clinical$PATIENT_ID
+
+# Process tcga_m1
+rm1 <- rowMeans(tcga_m1, na.rm = TRUE)
+idx1 <- tapply(seq_along(rm1), names(rm1), function(i) i[which.max(rm1[i])])
+mm1 <- tcga_m1[idx1, used.ids]
+rownames(mm1) <- names(rm1[idx1])
+
+# Process tcga_m3 using idx1 from tcga_m1
+mm3 <- tcga_m3[idx1, used.ids]
+rownames(mm3) <- rownames(mm1)
+
+tcga_m1 <- mm1
+tcga.m3 <- mm3
+
+```
+
+### Process expression data for analysis
+```{r}
+tcga.syms <- intersect(rownames(tcga.m1), rownames(tcga.m3))
+tcga.syms <- tcga.syms[!is.na(tcga.syms)]
+
+tcga.m1 <- tcga.m1[tcga.syms, ]
+tcga.m3 <- tcga.m3[tcga.syms, ]
+
+tcga.m1 <- tcga.m1[, used.ids]
+tcga.m3 <- tcga.m3[, used.ids]
+```
+
+## Venn diagram for subtypes 
+```{r}
+mm <- with(tcga.clinical, cbind(
+  `ER+` = ER_STATUS_BY_IHC == "Positive",
+  `PR+` = PR_STATUS_BY_IHC == "Positive",
+  `HER2+` = IHC_HER2 == "Positive"
+))
+
+mm[] <- lapply(mm, as.integer)
+rownames(mm) <- tcga.clinical$PATIENT_ID
+
+pdf(file.path(fig_dir,"2_prep_tcga","tcga_brca_subtypes.pdf"),width=7,height=7)
+vennDiagram(mm,main="TCGA samples, by subtypes")
+dev.off()
+
+```
+
+## Save processed data
+```{r}
+# Save the relevant objects to a .rda file for easy loading in future analysis
+save(tcga.ids,tcga.clinical,tcga.syms,tcga.m1,tcga.m3,
+     file=file.path(obj_dir,"1-4_prep","tcga_processed_v3.rda"))
+```
