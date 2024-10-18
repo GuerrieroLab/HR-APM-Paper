@@ -8,3 +8,6 @@ src_clin
 *.Rproj
 library
 *archive*
+library*
+*.RData
+*.rda
