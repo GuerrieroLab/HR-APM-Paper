@@ -7,17 +7,12 @@ output: html_notebook
 ### Load libraries
 ```{r}
 library(openxlsx)
-library(limma) # vennDiagram()
 ```
 
 ### Set paths
-```{r}
-proj_dir="~/Dropbox (HMS)/_projects_/B06 03 HR-APM/"
-data_dir <- file.path(proj_dir,"data")
-fig_dir <- file.path(proj_dir,"manuscript","figs")
-table_dir <- file.path(proj_dir,"manuscript_CD","tables")
-obj_dir <- file.path(proj_dir,"manuscript","RData")
-```
+This part is moved to  `.Rprofile` and not not shared in github. 
+
+A user should create a project directory `proj_dir`, which houses all the source codes. Under that, `data_dir` (raw data, flat files mostly), `fig_dir` (plots), `table_dir` (exported tables), and `obj_dir` (R objects) are created.
 
 ## Load manually cureated gene lists
 ### Funciton to load genes
@@ -42,68 +37,11 @@ length(tc_gns) # 221 genes
 ```
 
 
-## Looking into overlaps between three gene lists
-
-```{r}
-# The gene lists are already unique due to the load_genes function
-gene_sig <- list(ERS = ers_gns, APM = apm_gns, TC = tc_gns)
-all_gns <- unique(unlist(gene_sig)) # 988 genes
-
-overlap <- sapply(gene_sig, function(x) {
-  all_gns %in% x
-})
-colnames(overlap) <- c("ERS", "APM", "TC")
-rownames(overlap) <- all_gns
-
-vennDiagram(overlap, main = "overlap")
-```
-
-### Re-classify genes based on overlaps between gene lists
-```{r}
-idx <- overlap %*% c(1, 2, 4)
-uniq_category <- c("ERS", "APM", "ERS/APM", "TC", "ERS/TC", "APM/TC")
-category <- factor(uniq_category[idx], levels = uniq_category[c(1, 2, 4, 3, 5, 6)])
-names(category) <- all_gns
-
-hallmarks <- c("ESR1", "CD8A", "HLA-A")
-category[hallmarks] # TC hallmark genes CD8[AB] are in fact APM/TC
-```
-
 ## Save the gene lists as an rda file
-
 ```{r}
-save(gene_sig,category,hallmarks,file=file.path(obj_dir,"1-4_prep","gene_signature.rda"))
+gene.sig <- list(ERS = ers_gns, APM = apm_gns, TC = tc_gns)
+save(gene.sig,file=file.path(obj_dir,"1-4_prep","gene_signature.rda"))
 ```
-## Andy Minn's list of IFN-related genes
-```{r}
-# Read the IFN signature genes from the text file and format them into a matrix
-ifn_sigs_path <- file.path(data_dir, "gene_list", "ifn_sigs.txt")
-ifn_sigs <- readLines(ifn_sigs_path)
-ifn_gns_matrix <- matrix(ifn_sigs, ncol = 6, byrow = TRUE)
 
-# Extract unique gene signatures from the matrix, removing empty entries
-minn_gns <- lapply(list(ISG.RS = ifn_gns_matrix[, 1], IFNG.RS = as.vector(ifn_gns_matrix[, -1])),
-                   function(x) x[x != ""])
-
-# Check for uniqueness of the genes in the list
-all_minn_gns <- unlist(minn_gns)
-is_unique <- !duplicated(all_minn_gns)
-if (!all(is_unique)) {
-  warning("Some gene signatures are not unique!")
-}
-
-# Display the table of gene counts
-table(all_minn_gns)
-
-# Optional code for comparing with existing gene signatures (kept as comment for reference)
-if(FALSE){
-  load(file.path(obj_dir, "1-4_prep", "gene_signature.rda")) # gene.sig, category, hallmarks
-  comparison_results <- lapply(minn_gns, function(x) table(x %in% unlist(gene.sig)))
-  # Further processing could be added here if needed
-}
-
-# Save the gene signatures from Andy Minn's list into an RDS file
-saveRDS(minn_gns, file = file.path(obj_dir, "1-4_prep", "minn_ifnns.rda"))
-```
 
 
