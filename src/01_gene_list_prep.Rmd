@@ -12,9 +12,7 @@ suppressPackageStartupMessages({
 ```
 
 ### Set paths
-This part is moved to  `.Rprofile` and not not shared in github. 
-
-A user should create a project directory `proj_dir`, which houses all the source codes. Under that, `data_dir` (raw data, flat files mostly), `fig_dir` (plots), `table_dir` (exported tables), and `obj_dir` (R objects) are created.
+This part is moved to  `.Rprofile` and not not shared in github. (See README.md)
 
 ## Load manually cureated gene lists
 ### Funciton to load genes
