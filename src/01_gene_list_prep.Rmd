@@ -1,6 +1,6 @@
 ---
 title: "1. create gene signatures from the excel files"
-output: html_notebook
+#output: html_notebook
 ---
 
 ## Initial setting
