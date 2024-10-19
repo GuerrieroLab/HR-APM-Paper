@@ -1,0 +1,332 @@
+---
+title: "3. Prepare METABRIC data"
+#output: html_notebook
+---
+
+## Initial setup
+
+### Load libraries
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(limma) # For vennDiagram
+  library(mclust)
+})
+```
+
+## Load expresssion data (downloaded form cBioPortal)
+
+In the script below:
+- meta_mat1: Raw expression values (log2-transformed) from RNA-Seq (data_RNA_Seq_v2_expression_median.txt)
+- meta_mat2: Z-scores normalized for each gene relative to the cohort (data_RNA_Seq_v2_mRNA_median_Zscores.txt)
+- meta_mat3: Z-scores normalized across all samples (data_RNA_Seq_v2_mRNA_median_all_sample_Zscores.txt)
+
+```{r}
+fns <- file.path(metabric_dir, c(
+  "data_expression_median.txt",
+  "data_mRNA_median_Zscores.txt",
+  "data_mRNA_median_all_sample_Zscores.txt"
+))
+
+meta.mat1 <- read.table(fns[1], sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+meta.mat2 <- read.table(fns[2], sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+meta.mat3 <- read.table(fns[3], sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+
+meta.mat1[1:5, 1:5] # Preview of the first matrix's top-left corner
+
+```
+## Pre-processing data
+### Compare three expression matrices
+
+```{r}
+identical(colnames(meta.mat1), colnames(meta.mat2)) # TRUE 
+identical(colnames(meta.mat1), colnames(meta.mat3)) # TRUE
+```
+
+## Pre-processing data
+### Compare three expression matrices
+```{r}
+## colnames - identical
+meta.m1 <- as.matrix(meta.mat1[,-(1:2)])
+rownames(meta.m1) <- meta.mat1$Hugo_Symbol ## genes whose expression is measured
+
+meta.m2 <- as.matrix(meta.mat2[,-(1:2)])
+rownames(meta.m2) <- meta.mat2$Hugo_Symbol ## genes whose expression is measured
+
+meta.m3 <- as.matrix(meta.mat3[,-(1:2)])
+rownames(meta.m3) <- meta.mat3$Hugo_Symbol ## genes whose expression is measured
+
+dim(meta.m1) # 24368 genes, 1904 samples
+dim(meta.m2) # 18543 genes, 1904 samples
+dim(meta.m3) # 24368 genes, 1904 samples
+```
+
+### mat1 and mat3 have identical gene sets.
+```{r}
+identical(meta.mat1$Hugo_Symbol,meta.mat3$Hugo_Symbol) # true
+```
+
+### colnames are unique
+```{r}
+table(table(colnames(meta.m3))) # 1904 samples, all unique
+```
+
+
+## Trim samples and genes
+### Load Clinical Data and Prepare for Analysis
+```{r}
+meta.clinical <- read.table(file.path(metabric_dir, "data_clinical_patient.txt"), sep = "\t", header = TRUE)
+meta.clinical2 <- read.table(file.path(metabric_dir, "data_clinical_sample.txt"), sep = "\t", header = TRUE)
+meta.clinical <- meta.clinical %>% left_join(meta.clinical2, by = "PATIENT_ID")
+meta.clinical$PATIENT_ID <- gsub("-", ".", meta.clinical$PATIENT_ID)
+used.ids <- colnames(meta.m3)
+meta.clinical <- meta.clinical %>% filter(PATIENT_ID %in% used.ids)
+```
+
+### Disease Status and Patient IDs per Subtype
+
+```{r}
+# Filter for known ER, PR, and HER2 status
+meta.clinical <- meta.clinical %>%
+  filter(ER_STATUS %in% c("Positive", "Negative")) %>%
+  filter(PR_STATUS %in% c("Positive", "Negative")) %>%
+  filter(HER2_STATUS %in% c("Positive", "Negative"))
+
+# Extract patient IDs for each subtype
+meta.ids <- list(
+  hr = filter(meta.clinical, ER_STATUS == "Positive" | PR_STATUS == "Positive", HER2_STATUS == "Negative") %>% pull(PATIENT_ID),
+  her2 = filter(meta.clinical, ER_STATUS == "Negative", PR_STATUS == "Negative", HER2_STATUS == "Positive") %>% pull(PATIENT_ID),
+  dp = filter(meta.clinical, ER_STATUS == "Positive" | PR_STATUS == "Positive", HER2_STATUS == "Positive") %>% pull(PATIENT_ID),
+  tnbc = filter(meta.clinical, ER_STATUS == "Negative", PR_STATUS == "Negative", HER2_STATUS == "Negative") %>% pull(PATIENT_ID)
+)
+```
+
+### Visualize Patient Subtypes with Venn Diagram
+
+```{r}
+# Prepare data for Venn diagram visualization
+mm <- with(meta.clinical, cbind(
+  `ER+` = ER_STATUS == "Positive",
+  `PR+` = PR_STATUS == "Positive",
+  `HER2+` = HER2_STATUS == "Positive"
+))
+
+# Convert logical values to numeric for compatibility
+mm <- as.data.frame(mm)
+mm[] <- lapply(mm, as.integer)
+rownames(mm) <- meta.clinical$PATIENT_ID
+
+# Generate Venn diagram and save as PDF
+pdf(file.path(fig_dir, "3_prep_metabric", "metabric_brca_subtypes.pdf"), width = 7, height = 7)
+vennDiagram(as.matrix(mm), main = "METABRIC samples")
+dev.off()
+```
+
+### Remove Redundant Genes and Retain Most Abundantly Expressed Variants
+
+```{r}
+remove_redundant_genes <- function(expr_matrix, used_ids) {
+  # Calculate row means for the expression matrix, removing NA values
+  row_means <- rowMeans(expr_matrix, na.rm = TRUE)
+  
+  # Generate a vector of unique gene symbols
+  gene_symbols <- rownames(expr_matrix)
+  
+  # Apply a function over each gene symbol to find the index of the entry with the maximum mean expression
+  idx <- tapply(seq_along(row_means), gene_symbols, function(i) {
+    this_means <- row_means[i]
+    max_mean_idx <- which(this_means == max(this_means))
+    return(i[max_mean_idx])
+  }, simplify = TRUE)
+  
+  # Flatten the list to get a simple vector of indices (in case of multiple max means, take the first)
+  idx <- unlist(idx, use.names = FALSE)
+  
+  # Subset the expression matrix to include only selected indices
+  cleaned_matrix <- expr_matrix[idx, , drop = FALSE]
+  
+  # Ensure the matrix only includes samples present in the clinical data
+  cleaned_matrix <- cleaned_matrix[, used_ids, drop = FALSE]
+  
+  # Correct row names by ensuring only unique gene symbols are retained
+  cleaned_matrix_rownames <- names(row_means)[idx]
+  rownames(cleaned_matrix) <- cleaned_matrix_rownames[!duplicated(cleaned_matrix_rownames)]
+  
+  return(cleaned_matrix)
+}
+
+# Apply the function to METABRIC expression matrices
+meta.m1.cleaned <- remove_redundant_genes(meta.m1, used.ids)
+meta.m3.cleaned <- remove_redundant_genes(meta.m3, used.ids)
+```
+### Process Expression Data for Analysis
+```{r}
+# Filter matrices to include only unique genes and samples present in clinical data
+meta.syms <- intersect(rownames(meta.m1.cleaned), rownames(meta.m3.cleaned))
+meta.m1 <- meta.m1.cleaned[meta.syms, used.ids]
+meta.m3 <- meta.m3.cleaned[meta.syms, used.ids]
+```
+#### Rownames in m1 and m3 are identical
+```{r}
+identical(rownames(meta_m1),rownames(meta_m3))
+```
+
+
+## Remove artifacts
+### Define threshold for expression: `exp.th`
+```{r}
+## Remove artifacts: Define threshold for expression (`exp.th`)
+mm1 <- meta.m1
+mm3 <- meta.m3
+
+# Calculate the mean expression for each gene across samples, excluding NA values
+med.m1 <- apply(mm1, 1, mean, na.rm = TRUE)
+
+# Generate a histogram to visually inspect the distribution of mean expression values
+x <- hist(mm1, breaks = 1000)
+mean.x <- x$mids[which(x$counts == max(x$counts))]
+
+# Draw a vertical line at the most common expression value (mode)
+abline(v = mean.x, col = 2)
+
+# Identify negative deviations from the mode and calculate their standard deviation
+negs <- mm1[mm1 < mean.x] - mean.x
+negs <- negs[!is.na(negs)]
+sd.x <- sqrt(sum(negs^2) / length(negs))
+
+# Overlay a normal distribution that matches the mode and spread of the data
+xs <- x$mids
+ds <- dnorm(xs, mean = mean.x, sd = sd.x)
+f <- max(x$counts) / max(ds)
+lines(xs, ds * f, col = 3)
+
+# Determine a threshold for expression based on a high percentile (e.g., the 99.9th percentile)
+p.thres <- 1 - 10^-3
+exp.th <- qnorm(p.thres, mean = mean.x, sd = sd.x)
+abline(v = exp.th, col = 2)
+```
+
+#### Exemplar - HLA-A and HLA-C gene expression compared to all genes
+```{r}
+pdf(file.path(fig_dir,"3_prep_metabric","prep_hlaa_exp1.pdf"),width=7,height=7)
+par(mfrow=c(3,1))
+rng <- range(mm1[,],na.rm=T)
+x <- hist(mm1[,],breaks=1000,xlim=rng,border=NA,col="grey60",freq=TRUE,
+     main="METABRIC: Expression of all genes",
+     xlab="Expression (log2)")
+abline(v=mean.x)
+lines(xs,ds,col="steelblue",lwd=2) ## doesn't fit
+abline(v=exp.th,col=2)
+hist(mm1["HLA-A",],breaks=x$breaks,xlim=rng,border=NA,col="grey60",
+     main="METABRIC: Expression of HLA-A",
+     xlab="Expression (log2)")
+abline(v=exp.th,col=2)
+hist(mm1["HLA-C",],breaks=x$breaks,xlim=rng,border=NA,col="grey60",
+    main="METABRIC: Expression of HLA-C",
+    xlab="Expression (log2)")
+abline(v=exp.th,col=2)
+dev.off()
+```
+
+### Impute NAs with the background value (mean.x)
+```{r}
+# Replace NAs with the background expression value (mean.x)
+mm1[is.na(mm1)] <- mean.x
+uniq.syms1 <- rownames(mm1)
+```
+
+### Assess expression below threshold
+```{r}
+# Count the number of expressions below the defined threshold for each gene
+has.0 <- apply(mm1, 1, function(xx) sum(xx < exp.th))
+med.0 <- apply(mm1, 1, median)
+```
+
+### Identify genes lacking expression artificially
+```{r}
+# Identify artificially low expression genes using Gaussian mixture models
+lst <- parallel::mclapply(uniq.syms1, function(sym) {
+  this <- mm1[sym, ]
+  bic <- mclustBIC(this, G = 1:2, modelNames = "V")
+  g <- which.max(bic)
+  mc <- Mclust(this, G = g, modelNames = "V")
+  mns <- mc$parameters$mean
+  
+  if (g == 1) {
+    peaks <- c(mns, NA)
+    is.between <- NA
+  } else {
+    peaks <- sort(mns)
+    max.min <- max(this[mc$classification == 1])
+    is.between <- max.min > min(mns) && max.min < max(mns)
+  }
+  
+  is.bg <- min(mns) < exp.th
+  max.sig <- max(mns) > exp.th
+  
+  return(c(sym = sym, g = g, is.bg = is.bg, sig = max.sig, p1 = peaks[1], p2 = peaks[2], is.between = is.between))
+}, mc.cores = 4)
+
+saveRDS(lst,file.path(obj_dir,"1-4_prep","lst.rds"))
+
+# Convert list to a data frame
+lst1 <- as.data.frame(do.call(rbind, lst), stringsAsFactors = FALSE) %>%
+  mutate(is.bg = as.logical(is.bg),
+         sig = as.logical(sig),
+         is.between = as.logical(is.between),
+         p1 = as.numeric(p1),
+         p2 = as.numeric(p2))
+
+```
+
+# Data for further analysis
+```{r}
+# Combine gene information and significant metrics for downstream analysis
+df <- cbind(lst1, median = med.0, n_samples_below_threshold = has.0) %>%
+  mutate(difference = p2 - p1)
+df$is_between[is.na(df$is_between)] <- FALSE
+```
+
+
+#### Make low values `NA`
+
+```{r}
+# Copy original matrices for modification
+mm1.0 <- mm1
+mm3.0 <- mm3
+
+mm1.1 <- mm1[significant.genes$sym,]
+mm3.1 <- mm3[significant.genes$sym,]
+
+mm1.1[mm1[significant.genes$sym,] < exp.th] <- NA
+mm3.1[mm1[significant.genes$sym,] < exp.th] <- NA
+sum(is.na(mm1.1)) # 6437
+sum(is.na(mm3.1)) # 6437
+
+mm1.0[significant.genes$sym,] <- mm1.1
+mm3.0[significant.genes$sym,] <- mm3.1
+
+meta.m1 <- mm1.0
+meta.m3 <- mm3.0
+
+range(rowSums(is.na(mm3.0))) # 0-465
+range(colSums(is.na(mm3.0))) # 0-13
+
+```
+
+## Save data in rda
+```{r}
+meta.syms <- uniq.syms1
+meta.exp.th <- exp.th
+meta.df <- df
+meta.sig.df <- significant.genes # 20 genes
+
+save(meta.ids,meta.clinical,meta.syms,meta.m1,meta.m3,
+     meta.exp.th,meta.df,meta.sig.df,
+     file=file.path(obj_dir,"1-4_prep","metabric_processed_v3.rda"))
+```
+
+```{r}
+x <- load(file.path(obj_dir,"1-4_prep","metabric_processed_v3.rda"))
+```
+
