@@ -17,9 +17,9 @@ suppressPackageStartupMessages({
 ## Load expresssion data (downloaded form cBioPortal)
 
 In the script below:
-- meta_mat1: Raw expression values (log2-transformed) from RNA-Seq (data_RNA_Seq_v2_expression_median.txt)
-- meta_mat2: Z-scores normalized for each gene relative to the cohort (data_RNA_Seq_v2_mRNA_median_Zscores.txt)
-- meta_mat3: Z-scores normalized across all samples (data_RNA_Seq_v2_mRNA_median_all_sample_Zscores.txt)
+- meta_mat1: Raw expression values (log2-transformed) from RNA-Seq (data_expression_median.txt)
+- meta_mat2: Z-scores normalized for each gene relative to the cohort (data_mRNA_median_Zscores.txt)
+- meta_mat3: Z-scores normalized across all samples (data_mRNA_median_all_sample_Zscores.txt)
 
 ```{r}
 fns <- file.path(metabric_dir, c(
@@ -244,7 +244,6 @@ med.0 <- apply(mm1, 1, median)
 
 ### Identify genes lacking expression artificially
 ```{r}
-# Identify artificially low expression genes using Gaussian mixture models
 lst <- parallel::mclapply(uniq.syms1, function(sym) {
   this <- mm1[sym, ]
   bic <- mclustBIC(this, G = 1:2, modelNames = "V")
@@ -278,8 +277,7 @@ lst1 <- as.data.frame(do.call(rbind, lst), stringsAsFactors = FALSE) %>%
          p2 = as.numeric(p2))
 
 ```
-
-# Data for further analysis
+### Data for further analysis
 ```{r}
 # Combine gene information and significant metrics for downstream analysis
 df <- cbind(lst1, median = med.0, n_samples_below_threshold = has.0) %>%
@@ -326,7 +324,4 @@ save(meta.ids,meta.clinical,meta.syms,meta.m1,meta.m3,
      file=file.path(obj_dir,"1-4_prep","metabric_processed_v3.rda"))
 ```
 
-```{r}
-x <- load(file.path(obj_dir,"1-4_prep","metabric_processed_v3.rda"))
-```
 
