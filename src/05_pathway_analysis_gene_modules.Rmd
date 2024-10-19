@@ -1,0 +1,154 @@
+---
+title: "5. Looking into the overlap between the clusters"
+# output: html_notebook
+---
+
+## Initial setup
+
+### Load libraries
+```{r}
+suppressPackageStartupMessages({
+  library(qvalue)
+  library(org.Hs.eg.db)
+  library(dplyr)
+})
+```
+
+### Load data
+```{r}
+coarse.mods <- readRDS(file=file.path(obj_dir,"1-4_prep","modules3_ers_immune_cc.rds"))
+final.mods <- readRDS(file.path(obj_dir,"1-4_prep","module_genes_final_122923.rds"))
+final.mods <- c(final.mods, coarse.mods[2:3])
+
+tested.gns <- readRDS(file=file.path(obj_dir,"1-4_prep","common_tested_gns_v3.rds"))
+
+sapply(final.mods,length)
+```
+
+## Pathway enrichment analysis
+### Load pathways from msigdb v6.1
+```{r}
+if(0){
+  gmts <- dir(path=msigdb_dir)
+  
+  h0 <- strsplit(readLines(file.path(msigdb_dir,"h.all.v2022.1.Hs.symbols.gmt")),"\\t")
+  #h0 <- strsplit(readLines(file.path(msigdb_dir,"h.all.v2022.1.Hs.entrez.gmt")),"\\t")
+  gs0 <- lapply(h0,function(x)x[-(1:2)])
+  names(gs0) <- sapply(h0,function(x)x[1])
+  
+  c2 <- strsplit(readLines(file.path(msigdb_dir,"c2.all.v2022.1.Hs.symbols.gmt")),"\\t")
+  #c2 <- strsplit(readLines(file.path(msigdb_dir,"c2.all.v2022.1.Hs.entrez.gmt")),"\\t")
+  gs2 <- lapply(c2,function(x)x[-(1:2)])
+  names(gs2) <- sapply(c2,function(x)x[1])
+  
+  c5 <- strsplit(readLines(file.path(msigdb_dir,"c5.all.v2022.1.Hs.symbols.gmt")),"\\t")
+  #c5 <- strsplit(readLines(file.path(msigdb_dir,"c5.go.v2022.1.Hs.entrez.gmt")),"\\t")
+  gs5 <- lapply(c5,function(x)x[-(1:2)])
+  names(gs5) <- sapply(c5,function(x)x[1])
+  
+  msigdb <- c(gs0,gs2,gs5)
+  ans <- sub("_.+","",names(msigdb))
+  msigdb <- msigdb[ans %in% c("HALLMARK","GOBP","GOMF","GOCC","KEGG","REACTOME","BIOCARTA")]
+  
+  saveRDS(msigdb,file.path(obj_dir,"5_pathway_analysis","msigdb.rds"))
+  
+  reg0 <- strsplit(readLines(file.path(msigdb_dir,"c3.all.v2023.1.Hs.symbols.gmt")),"\\t")
+  msigdb.reg0 <- lapply(reg0,function(x)x[-(1:2)])
+  names(msigdb.reg0) <- sapply(reg0,function(x)x[1])
+  
+  saveRDS(msigdb.reg0,file.path(obj_dir,"5_pathway_analysis","msigdb_reg.rds"))
+  
+}else{
+  msigdb <- readRDS(file.path(obj_dir,"5_pathway_analysis","msigdb.rds"))
+}
+```
+
+#### Filter pathways (each pathway should have >= 20 and <= 500 genes)
+```{r}
+ms.gns <- unique(unlist(msigdb))
+
+all.genes <- intersect(ms.gns,tested.gns) # 13824
+msigdb.1 <- lapply(msigdb,function(x){
+	gs1 <- x[x %in% all.genes]
+	return(gs1)
+})
+
+ge20 <- sapply(msigdb.1,length)>=20 & sapply(msigdb.1,length) <= 500
+msigdb.2 <- msigdb.1[ge20] # 5237 pathways
+ans <- sub("_.+","",names(msigdb.2))
+table(ans)
+
+all.genes <- intersect(unlist(msigdb.2),tested.gns) # 13322
+
+comm.gns <- lapply(final.mods,function(x){
+  gs1 <- x[x %in% all.genes]
+  return(gs1)
+})
+
+names(comm.gns) <- sub("/","",names(comm.gns))
+```
+```{r}
+## keep only HALLMARKs
+msigdb.2 <- msigdb.2[grepl("^HALLMARK",names(msigdb.2))]
+
+```
+
+### Compute significance of overlaps
+```{r}
+compute_pvals <- function(module, gene_set) {
+  tab <- table(all.genes %in% module, all.genes %in% gene_set)[c("TRUE", "FALSE"), c("TRUE", "FALSE")]
+  fisher.test(tab, alternative = "greater")$p.value
+}
+
+pvals.ERS <- sapply(msigdb.2, function(gene_set) compute_pvals(comm.gns$ERS, gene_set))
+pvals.CC <- sapply(msigdb.2, function(gene_set) compute_pvals(comm.gns$CC, gene_set))
+pvals.Imm <- sapply(msigdb.2, function(gene_set) compute_pvals(comm.gns$Immune, gene_set))
+pvals.TNFaNFkB <- sapply(msigdb.2, function(gene_set) compute_pvals(comm.gns$TNFaNFkB, gene_set))
+pvals.IFNI <- sapply(msigdb.2, function(gene_set) compute_pvals(comm.gns$`IFN-I`, gene_set))
+pvals.APMTC <- sapply(msigdb.2, function(gene_set) compute_pvals(comm.gns$APMTC, gene_set))
+
+```
+
+### FDR-adjusted p-values
+```{r}
+nlqs.ERS <- -log10(qvalue(pvals.ERS)$qvalue)
+nlqs.CC <- -log10(qvalue(pvals.CC)$qvalue)
+nlqs.Imm <- -log10(qvalue(pvals.Imm)$qvalue)
+nlqs.TNFaNFkB <- -log10(qvalue(pvals.TNFaNFkB)$qvalue)
+nlqs.IFNI <- -log10(qvalue(pvals.IFNI)$qvalue)
+nlqs.APMTC <- -log10(qvalue(pvals.APMTC)$qvalue)
+
+```
+
+#### significant pathways
+```{r}
+df <- data.frame(pathway=names(nlqs.ERS),
+  ERS=nlqs.ERS,
+  CC=nlqs.CC,
+  Imm=nlqs.Imm,
+  TNFaNFkB=nlqs.TNFaNFkB,
+  IFNI=nlqs.IFNI,
+  APMTC=nlqs.APMTC) %>%
+  
+  mutate(across(ERS:APMTC, ~ round(.,2)))
+
+rownames(df) <- c() 
+
+max.class1 <- names(df[2:4])[apply(df[2:4],1,which.max)]
+max.class2 <- names(df[5:7])[apply(df[5:7],1,which.max)]
+max.nlq <- apply(df[c(2:3,5:7)],1,max)
+
+df1 <- df %>%
+  mutate(class1 = factor(max.class1,levels=names(df)[2:4])) %>%
+  mutate(class2 = factor(max.class2,levels=names(df)[5:7])) %>%  
+  mutate(max.nlq = max.nlq) %>%
+  arrange(class1,class2,desc(max.nlq)) %>%
+  filter(max.nlq > 5) %>%
+  filter(grepl("^HALLMARK",pathway)) %>%
+  mutate(pathway=sub("HALLMARK_","",pathway)) %>%
+  mutate(pathway=tolower(gsub("_"," ",pathway)))
+  
+wb1 <- openxlsx::buildWorkbook(df1)
+openxlsx::saveWorkbook(wb1,file.path(fig_dir,"Table_S2_1_pathways_gene_modules_v3.xlsx"),overwrite=T)
+
+```
