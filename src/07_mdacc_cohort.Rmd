@@ -1,0 +1,132 @@
+---
+title: "7. MDACC cohort analysis"
+output: html_notebook
+---
+
+## Initial setting
+### Load libraries
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(heatmap3)
+})
+```
+
+### Load Data
+```{r}
+mdacc_metadata <- read.csv(file.path(data_dir, "clinical", "mdacc", "MDACC 74 tumors description.csv")) %>%
+  mutate(Subtype.classification = factor(c("HR+", "DP", "TNBC", "HER2+")[((HR.status == "negative") * 2 + (HER2.status == "positive") + 1)], 
+                                         levels = c("HR+/HER2-", "HR+/HER2+", "HR-/HER2-", "HR-/HER2+")))
+names(mdacc_metadata)[1] <- "sample_name"
+
+mdacc_data <- read.csv(file.path(data_dir, "clinical", "mdacc", "MDACC 74 tumors log2 tpm RNA-seq data.csv"))
+names(mdacc_data)[1] <- "hgnc_symbol"
+
+sigs <- readRDS(file = file.path(obj_dir, "1-4_prep", "module_genes_final_122923.rds"))
+comm.gns <- unlist(sigs)
+comm.ers <- sigs$ERS
+comm.apm.tc <- unlist(sigs[-1])
+
+load(file = file.path(obj_dir, "1-4_prep", "heatmap_sidecols.rda")) # lcols, slcols
+
+lcols1 <- lcols[comm.gns, ]
+hallmarks <- c("ESR1", "CD8A", "HLA-A")
+```
+
+## MDACC correlation analysis
+### Subtype classification and Pearson correlation based on subtypes
+```{r}
+mdacc.ids <- list(
+  hr = mdacc_metadata %>% filter(Subtype.classification == "HR+/HER2-") %>% pull(sample_name),
+  her2 = mdacc_metadata %>% filter(Subtype.classification == "HR-/HER2+") %>% pull(sample_name),
+  dp = mdacc_metadata %>% filter(Subtype.classification == "HR+/HER2+") %>% pull(sample_name),
+  tnbc = mdacc_metadata %>% filter(Subtype.classification == "HR-/HER2-") %>% pull(sample_name))
+
+# Filter expression data to relevant genes and samples
+mdacc.exp <- mdacc_data[match(comm.gns, mdacc_data$hgnc_symbol), -1]
+rownames(mdacc.exp) <- comm.gns
+
+mdacc.pe <- lapply(mdacc.ids, function(used.ids) {
+  used.ids <- used.ids[used.ids %in% colnames(mdacc.exp)]
+  cor(t(mdacc.exp[, used.ids]), method = "spearman", use = "everything")
+})
+
+# Verify matched expression data
+mdacc.exp <- mdacc_data[match(comm.gns, mdacc_data$hgnc_symbol), -1]
+rownames(mdacc.exp) <- comm.gns
+```
+
+### [Fig S3A] Generate heatmaps for module gene correlates
+```{r}
+## subtypes
+ttls <- c("HR+/HER2-","HR+/HER2+","HR-/HER2-","HR-/HER2+")
+smpl.class <- names(mdacc.pe)[c(1,3,4,2)]
+names(ttls) <- smpl.class
+
+cols <- colorRampPalette(c("navy", "white", "firebrick3"))(201)
+
+##
+for(cl in smpl.class){
+  pdf(file.path(fig_dir,"7_mdacc_subtypes",paste0("mdacc_",cl,"_v4.pdf")),
+      width=7,height=7)	
+	par(cex.main=3)
+
+	tmp <- mdacc.pe1 <- mdacc.pe[[cl]][comm.gns,comm.gns]
+
+  # d.tcga <- as.dist(1-mdacc.pe1)
+
+	cgs <- comm.gns
+	cgs[!cgs %in% hallmarks] <- NA
+	
+	rownames(tmp) <- colnames(tmp) <- cgs
+  heatmap3(tmp,
+           # Colv=d.tcga,Rowv=d.tcga,
+           Colv=NA,Rowv=NA,
+           ColSideColors=lcols[comm.gns,c(1,3,4)],
+           col=cols,
+           scale="none",
+           balanceColor=TRUE,
+           main=paste0(ttls[cl],", (MDACC)"))
+	dev.off()
+}
+```
+
+### [Fig S3B] Heatmap of mean module gene correlates
+```{r}
+mean.mdacc.pe <- lapply(mdacc.pe, function(pe) {
+  sapply(sigs, function(x) sapply(sigs, function(y) mean(pe[x, y], na.rm = TRUE)))
+})
+
+# Save heatmaps and csv files
+for (cl in smpl.class){
+  pdf(file.path(fig_dir, "7_mdacc_subtypes", paste0("mean_mdacc_", cl, "_v4.pdf")), width = 7, height = 7)
+  
+  cols1 <- cols[(-100:100) %in% seq(-round(max(abs(mean.mdacc.pe[[cl]]) * 100)), round(max(abs(mean.mdacc.pe[[cl]]) * 100)))]
+  heatmap3(mean.mdacc.pe[[cl]], Rowv = NA, Colv = NA, col = cols1, scale = "none", balanceColor = TRUE,
+           ColSideColors = slcols[, 2:1], RowSideColors = slcols, margins = c(7, 7), cexRow = 1.5, cexCol = 1.5,
+           main = paste0(ttls[cl], " (MDACC, mean)"))
+  
+  dev.off()
+  write.csv(mean.mdacc.pe[[cl]], file.path(fig_dir, "7_mdacc_subtypes", paste0("mean_mdacc_", cl, "_v4.csv")))
+}
+```
+
+## ESR1 expression per subclass
+```{r}
+esr1.mdacc <- mdacc_data %>%
+  filter(hgnc_symbol == "ESR1") %>%
+  gather(sample_name, esr1, -hgnc_symbol) %>%
+  inner_join(mdacc_metadata, by = "sample_name") %>%
+  select(sample_name, esr1, Subtype.classification, HR.status)
+
+esr1.mdacc$esr1 <- as.numeric(esr1.mdacc$esr1)
+
+p <- ggplot(esr1.mdacc, aes(Subtype.classification, esr1)) +
+  geom_violin(fill = 'grey80') +
+  geom_jitter(height = 0, width = 0.2, size = 0.5) +
+  labs(title = "MDACC", x = "", y = "ESR1 expression (log2(TPM+1)")
+
+p
+```
