@@ -296,7 +296,7 @@ meta.sig <- list(ers=ers.m,cc=cc.m,immune=immune.m)
 #### Combine both signatures - select genes that are only positively correated within the module
 
 ```{r}
-nm.sigs <- c("ers","immune","cc")
+nm.sigs <- c("ERS","Immune","CC")
 
 sigs <- list()
 for(sig in nm.sigs){
