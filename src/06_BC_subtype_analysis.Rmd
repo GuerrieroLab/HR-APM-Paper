@@ -1,5 +1,5 @@
 ---
-title: "6. Looking into the correlation in different cancer types"
+title: "6. Ccorrelation in different breast cancer subtypes"
 # output: html_notebook
 ---
 
@@ -9,7 +9,6 @@ title: "6. Looking into the correlation in different cancer types"
 ```{r}
 suppressPackageStartupMessages({
   library(RColorBrewer)
-  library(gplots)
   library(ggplot2)
   library(heatmap3)
   library(GSVA)
@@ -22,27 +21,23 @@ suppressPackageStartupMessages({
 
 ### Load data
 ```{r}
-# x <- load(file=file.path(obj_dir,"1-4_prep","gene_signature.rda")) # gene.sig, category, hallmarks
-y <- load(file=file.path(obj_dir,"1-4_prep","tcga_processed_v3.rda")) # meta.ids,meta.clinical,meta.syms,meta.m1,meta.m3
-z <- load(file=file.path(obj_dir,"1-4_prep","metabric_processed_v3.rda")) # meta.ids,meta.clinical,meta.syms,meta.m1,meta.m3
+# Load required data
+load(file.path(obj_dir, "1-4_prep", "tcga_processed_v3.rda"))
+load(file.path(obj_dir, "1-4_prep", "metabric_processed_v3.rda"))
+load(file.path(obj_dir, "1-4_prep", "tcga_metabric_cors.rda"))
+load(file.path(obj_dir, "1-4_prep", "heatmap_sidecols.rda"))
 
-tested.gns  <- intersect(tcga.syms,meta.syms)
-
-hallmarks <- c("ESR1","CD8A","HLA-A")
-load(file=file.path(obj_dir,"1-4_prep","tcga_metabric_cors.rda")) # tcga.sp,meta.sp
-
-mod.gns <- readRDS(file=file.path(obj_dir,"1-4_prep","module_genes_final_122923.rds"))#[c(1,2,4,3)]
-# names(sigs) <- c("ERS","TNFa/NFkB","IFN-I","APM/TC")
-sigs <- readRDS(file=file.path(obj_dir,"1-4_prep","modules3_ers_apmtc_cc.rds"))
-
-comm.gns <- unlist(mod.gns)
+tested.gns <- intersect(tcga.syms, meta.syms)
+sigs <- readRDS(file.path(obj_dir, "1-4_prep", "modules3_ers_immune_cc.rds"))
 comm.gns <- unlist(sigs[1:2])
-load(file=file.path(obj_dir,"1-4_prep","heatmap_sidecols.rda")) # lcols,slcols
+hallmarks <- c("ESR1", "CD8A", "HLA-A")
 ```
 
-## TCGA
+## Heatmap of Correlation for Subtypes
 
-### [Fig 1D] Heatmap of 254 module gene correlates
+### TCGA
+
+#### [Fig 1D] Heatmap of 254 module gene correlates
 ```{r}
 ## subtypes
 ttls <- c("HR+/HER2-","HR-/HER2+","HR+/HER2+","HR-/HER2-")
@@ -51,46 +46,41 @@ names(ttls) <- smpl.class
 
 tmp <- tcga.sp$hr[comm.gns,comm.gns]
 
-# cols <- colorRampPalette(rev(brewer.pal(11,"RdBu")))(201)
 cols <- colorRampPalette(c("navy", "white", "firebrick3"))(1024)
 
-cl <- smpl.cl
 hc <- heatmap3(tmp,
          # Colv=dend1,Rowv=dend1,
          ColSideColors=lcols[comm.gns,c(1,3,4)],
          col=cols,
          scale="none",
          balanceColor=TRUE,
-         main=paste0(ttls[cl],", (TCGA)"))
+         main=paste0(ttls[1],", (TCGA)"))
 comm.gns <- comm.gns[hc$hcr$order]
-##
-if(1){
-  for(cl in smpl.class){
-    pdf(file.path(fig_dir,"6_heatmap_bc_subtypes",paste0("tcga_",cl,"_v4.pdf")),
-        width=7,height=7)	
-  	par(cex.main=3)
-  
-  	tmp1 <- tcga.sp1 <- tcga.sp[[cl]][comm.gns,comm.gns]
-  
-    # d.tcga <- as.dist(1-tcga.sp1)
-  
-  	cgs <- comm.gns
-  	cgs[!cgs %in% hallmarks] <- NA
-  	
-  	rownames(tmp1) <- colnames(tmp1) <- cgs
-    heatmap3(tmp1,
-             Colv=NA,Rowv=NA,
-             # showColDendro=FALSE,showRowDendro=FALSE,
-             ColSideColors=lcols[comm.gns,c(1,3,4)],
-             col=cols,
-             scale="none",
-             balanceColor=TRUE,
-             main=paste0(ttls[cl],", (TCGA)"))
-  	dev.off()
-  }
+
+for(cl in smpl.class){
+  pdf(file.path(fig_dir,"6_heatmap_bc_subtypes",paste0("tcga_",cl,"_v4.pdf")),
+      width=7,height=7)	
+	par(cex.main=3)
+
+	tmp1 <- tcga.sp[[cl]][comm.gns,comm.gns]
+
+	cgs <- comm.gns
+	cgs[!cgs %in% hallmarks] <- NA
+	
+	rownames(tmp1) <- colnames(tmp1) <- cgs
+  heatmap3(tmp1,
+           Colv=NA,Rowv=NA,
+           # showColDendro=FALSE,showRowDendro=FALSE,
+           ColSideColors=lcols[comm.gns,c(1,3,4)],
+           col=cols,
+           scale="none",
+           balanceColor=TRUE,
+           main=paste0(ttls[cl],", (TCGA)"))
+	dev.off()
 }
+
 ```
-### [Fig 1E] Heatmap of mean module gene correlates
+#### [Fig 1E] Heatmap of mean module gene correlates
 ```{r}
 mean.tcga.sp <- list()
 cols <- colorRampPalette(c("navy", "white", "firebrick3"))(201)
@@ -112,7 +102,7 @@ for(cl in smpl.class){
   if(1){
     pdf(file.path(fig_dir,"6_heatmap_bc_subtypes",paste0("mean_tcga_",cl,"_v2.pdf")),
         width=7,height=7)
-    hc.t <- heatmap3(mean.tcga.sp[[cl]][idx,idx],Rowv=NA,Colv=NA,dendrogram="none",
+    hc.t <- heatmap3(mean.tcga.sp[[cl]][idx,idx],Rowv=NA,Colv=NA,
               col=cols1,scale="none",distfun=dist,
               ColSideColors=slcols[idx,2:1],
               RowSideColors=slcols[idx,],
@@ -126,52 +116,40 @@ for(cl in smpl.class){
 ```
 
 
-## METABRIC
+### METABRIC
 
-### Heatmap
+#### [Fig S2C] Heatmap of individual genes
 ```{r}
 tmp <- meta.sp$hr[comm.gns,comm.gns]
-d.meta <- as.dist(1-tmp)
 
-hc2 <- heatmap3(tmp,
-         Colv=d.meta,Rowv=d.meta,
-         ColSideColors=lcols[comm.gns,],
-         col=cols,
-         scale="none",
-         balanceColor=TRUE)
-comm.gns2 <- comm.gns[hc2$rowInd]
-cols <- colorRampPalette(rev(brewer.pal(11,"RdBu")))(50)
+cols <- colorRampPalette(c("navy", "white", "firebrick3"))(1024)
 
-if(1){
-  for(cl in smpl.class){
-    cols <- colorRampPalette(c("navy", "white", "firebrick3"))(201)
-    
-    pdf(file.path(fig_dir,"6_heatmap_bc_subtypes",paste0("meta_",cl,"_v2.pdf")),width=7,height=7)	
-  	par(cex.main=3)
-  	
-  	tmp <- meta.sp1 <- meta.sp[[cl]][comm.gns,comm.gns]
-  	
-    # d.meta <- as.dist(1-meta.sp1)
-  
-  	cgs <- comm.gns
-  	cgs[!cgs %in% hallmarks] <- NA
-  	
-  	rownames(tmp) <- colnames(tmp) <- cgs
-    heatmap3(tmp,
-             # Colv=d.meta,Rowv=d.meta,
-             Colv=NA,Rowv=NA,
-             ColSideColors=lcols[comm.gns,c(1,3,4)],
-             col=cols,
-             scale="none",
-             balanceColor=TRUE,
-             main=paste0(ttls[cl]," (METABRIC)"))
-    dev.off()
-  }
+for(cl in smpl.class){
+  pdf(file.path(fig_dir,"6_heatmap_bc_subtypes",paste0("meta_",cl,"_v2.pdf")),width=7,height=7)	
+	par(cex.main=3)
+
+	tmp <- meta.sp[[cl]][comm.gns,comm.gns]
+
+	cgs <- comm.gns
+	cgs[!cgs %in% hallmarks] <- NA
+	
+	rownames(tmp) <- colnames(tmp) <- cgs
+  heatmap3(tmp,
+           Colv=NA,Rowv=NA,
+           ColSideColors=lcols[comm.gns,c(1,3,4)],
+           col=cols,
+           scale="none",
+           balanceColor=TRUE,
+           main=paste0(ttls[cl]," (METABRIC)"))
+  dev.off()
 }
+
 ```
-### [Fig S2X] heatmap of mean correlations
+
+#### [Fig S2D] heatmap of mean correlations
 ```{r}
 mean.meta.sp <- list()
+cols <- colorRampPalette(c("navy", "white", "firebrick3"))(201)
 
 for(cl in smpl.class){
   tmp <- meta.sp[[cl]][comm.gns,comm.gns]
@@ -187,112 +165,112 @@ for(cl in smpl.class){
 
   n.max.cor.1 <- round(max(abs(mean.meta.sp[[cl]]))*100)
   cols1 <- cols[(-100:100) %in% seq(-n.max.cor.1,n.max.cor.1)]
-  # if(0){
-    pdf(file.path(fig_dir,"6_heatmap_bc_subtypes",paste0("mean_meta_",cl,"_v2.pdf")),
-        width=7,height=7)
-    hc.t <- heatmap3(mean.meta.sp[[cl]][idx,idx],Rowv=NA,Colv=NA,dendrogram="none",
-              col=cols1,scale="none",distfun=dist,
-              ColSideColors=slcols[idx,2:1],
-              RowSideColors=slcols[idx,],
-              balanceColor = TRUE,
-              margins=c(7,7),
-              cexRow=1.5,cexCol=1.5,
-              main=paste0("METABRIC (mean correlation),",cl))
-    dev.off()
-  # }
+  
+  pdf(file.path(fig_dir,"6_heatmap_bc_subtypes",paste0("mean_meta_",cl,"_v2.pdf")),
+      width=7,height=7)
+  hc.t <- heatmap3(mean.meta.sp[[cl]][idx,idx],Rowv=NA,Colv=NA,
+            col=cols1,scale="none",distfun=dist,
+            ColSideColors=slcols[idx,2:1],
+            RowSideColors=slcols[idx,],
+            balanceColor = TRUE,
+            margins=c(7,7),
+            cexRow=1.5,cexCol=1.5,
+            main=paste0("METABRIC (mean correlation),",cl))
+  dev.off()
 }
 ```
-## Violin plot
 
-## TCGA
-### Spearman correlation
+## Violin plot
+### TCGA
+#### Spearman correlation
 ```{r}
 tcga.sp.panel <- list()
 tcga.sp.panel$ers <- 
   tcga.sp.panel[["TNFa/NFkB"]] <- 
   tcga.sp.panel[["IFN-I"]] <- 
   tcga.sp.panel[["APM/TC"]] <- 
-  tcga.sp.panel$ers.apmtc1 <- 
-  tcga.sp.panel$ers.apmtc2 <- 
-  tcga.sp.panel$ers.apmtc3 <- list()
+  tcga.sp.panel[["Immune"]] <- 
+  tcga.sp.panel$ers.imm1 <- 
+  tcga.sp.panel$ers.imm2 <- 
+  tcga.sp.panel$ers.imm3 <-   
+  tcga.sp.panel$ers.imm <- list()
 
-tcga.sp.panel <- tcga.sp.panel[7:1]
-tcga.cohens_d <- tcga.pvals1 <- tcga.pvals <- list()
+tcga.sp.panel <- tcga.sp.panel[9:1]
+tcga.pvals1 <- tcga.pvals <- list()
 
-compute_cohens_d <- function(data, hypothesized_mean=0) {
-  # Calculate sample mean and sample standard deviation
-  sample_mean <- mean(data)
-  sample_sd <- sd(data)
-  
-  # Calculate sample size
-  n <- length(data)
-  
-  # Calculate Cohen's d
-  cohen_d <- (sample_mean - hypothesized_mean) / sample_sd
-  
-  return(cohen_d)
-}
+imm.gns <- unlist(mod.gns[-1])
+
+n <- 406 # number of SCC within ERS
 
 for(cl in smpl.class[c(1,3,4,2)]){
 	tmp <- tcga.sp[[cl]]
 	diag(tmp) <- NA
-	
-	g1 <- tmp[mod.gns[["ERS"]],mod.gns[["ERS"]]] # 378
-	g1 <- g1[lower.tri(g1)]
-	g2 <- tmp[mod.gns[["TNFa/NFkB"]],mod.gns[["TNFa/NFkB"]]] # 9045
-	g2 <- g2[lower.tri(g2)]
-	g3 <- tmp[mod.gns[["IFN-I"]],mod.gns[["IFN-I"]]] # 9045
-	g3 <- g3[lower.tri(g3)]
-	g4 <- tmp[mod.gns[["APM/TC"]],mod.gns[["APM/TC"]]] # 9045
-	g4 <- g4[lower.tri(g4)]
-	g5 <- as.vector(tmp[mod.gns[["ERS"]],mod.gns[["TNFa/NFkB"]]])# 3780
-	g6 <- as.vector(tmp[mod.gns[["ERS"]],mod.gns[["IFN-I"]]])# 3780
-	g7 <- as.vector(tmp[mod.gns[["ERS"]],mod.gns[["APM/TC"]]])# 3780
 
+	g1 <- tmp[mod.gns[["ERS"]],mod.gns[["ERS"]]] 
+	g1 <- g1[lower.tri(g1)] # 406
+	g2 <- tmp[mod.gns[["TNFa/NFkB"]],mod.gns[["TNFa/NFkB"]]] 
+	g2 <- g2[lower.tri(g2)] # 1378
+	g3 <- tmp[mod.gns[["IFN-I"]],mod.gns[["IFN-I"]]] 
+	g3 <- g3[lower.tri(g3)] # 378
+	g4 <- tmp[mod.gns[["APM/TC"]],mod.gns[["APM/TC"]]] 
+	g4 <- g4[lower.tri(g4)] # 10153
+	g5 <- tmp[imm.gns,imm.gns]
+	g5 <- g5[lower.tri(g5)] # 25200
+	g6 <- as.vector(tmp[mod.gns[["ERS"]],mod.gns[["TNFa/NFkB"]]])# 1537
+	g7 <- as.vector(tmp[mod.gns[["ERS"]],mod.gns[["IFN-I"]]])# 841
+	g8 <- as.vector(tmp[mod.gns[["ERS"]],mod.gns[["APM/TC"]]])# 4147
+	g9 <- as.vector(tmp[mod.gns[["ERS"]],imm.gns]) # 6525
+
+	set.seed(1)	
+	g1 <- sample(g1,n)
+	g2 <- sample(g2,n)
+	g3 <- sample(g3,n)
+	g4 <- sample(g4,n)
+	g5 <- sample(g5,n)
+	g6 <- sample(g6,n)
+	g7 <- sample(g7,n)
+	g8 <- sample(g8,n)
+	g9 <- sample(g9,n)	
+	
 	tcga.sp.panel$ers[[cl]] <- g1
 	tcga.sp.panel[["TNFa/NFkB"]][[cl]] <- g2
-	tcga.sp.panel[["IFN-I"]][[cl]] <- g3
+	tcga.sp.panel[["IFN-I"]][[cl]] <- g3 
 	tcga.sp.panel[["APM/TC"]][[cl]] <- g4
-	tcga.sp.panel$ers.apmtc1[[cl]] <- g5
-	tcga.sp.panel$ers.apmtc2[[cl]] <- g6
-	tcga.sp.panel$ers.apmtc3[[cl]] <- g7
-	pvals <- sapply(1:7,function(i){
+	tcga.sp.panel[["Immune"]][[cl]] <- g5
+	tcga.sp.panel$ers.imm1[[cl]] <- g6 
+	tcga.sp.panel$ers.imm2[[cl]] <- g7 
+	tcga.sp.panel$ers.imm3[[cl]] <- g8 
+	tcga.sp.panel$ers.imm[[cl]] <- g9 
+	
+	pvals <- sapply(1:9,function(i){
 	  obj <- get(paste0("g",i))
 	  wilcox.test(obj)$p.value
 	})
-	pvals1 <- sapply(1:7,function(i){
+	pvals1 <- sapply(1:9,function(i){
 	  obj <- get(paste0("g",i))
 	  t.test(obj)$p.value
 	})
 
-	cohend <- sapply(1:7,function(i){
-	  obj <- get(paste0("g",i))
-	  compute_cohens_d(obj)
-	})
-
+	names(pvals) <- names(pvals1) <- c("ERS","TNFA/NFKB","IFN-I","APM/TC","IMMUNE","ERS.IMM1","ERS.IMM2","ERS.IMM3","ERS.IMM")
+	
 	tcga.pvals[[cl]] <- pvals
 	tcga.pvals1[[cl]] <- pvals1
-	tcga.cohens_d[[cl]] <- cohend
 }
 
-tcga.pvals <- do.call(rbind,tcga.pvals)
-tcga.pvals1 <- do.call(rbind,tcga.pvals1)
-tcga.cohens_d <- round(do.call(rbind,tcga.cohens_d),2)
+tcga.pvals <- do.call(rbind,tcga.pvals) # wilcox
+tcga.pvals1 <- do.call(rbind,tcga.pvals1) # t.test
 
-tcga.ps <- array(rowSums(sapply(c(10,50,250),function(i)-log10(tcga.pvals1)>i)),dim(tcga.pvals1))
-```
-
-#### restructure data
-```{r}
 subtypes <- c("HR+/HER2-","HR+/HER2+","HR-/HER2-","HR-/HER2+") 
 
 names(tcga.sp.panel$ers) <- 
   names(tcga.sp.panel[["TNFa/NFkB"]]) <- 
   names(tcga.sp.panel[["IFN-I"]]) <- 
   names(tcga.sp.panel[["APM/TC"]]) <- 
-  names(tcga.sp.panel$ers.apmtc1) <- 
-  names(tcga.sp.panel$ers.apmtc2) <- 
-  names(tcga.sp.panel$ers.apmtc3) <- subtypes
+  names(tcga.sp.panel[["Immune"]]) <-   
+  names(tcga.sp.panel$ers.imm1) <- 
+  names(tcga.sp.panel$ers.imm2) <- 
+  names(tcga.sp.panel$ers.imm3) <- 
+  names(tcga.sp.panel$ers.imm) <- subtypes
 
 tcga.sps <- lapply(seq(tcga.sp.panel),function(i){
   n <- names(tcga.sp.panel)[[i]]
@@ -310,208 +288,174 @@ tcga.sps <- tcga.sps %>%
   mutate(subtype=subtypes[as.numeric(subtype)]) %>%
   mutate(subtype=factor(subtype,levels=subtypes)) %>%
   mutate(type=toupper(type))
-```
 
-### Violin plot
-```{r}
-tcga.ps <- array(rowSums(sapply(c(10,50,250),function(i)-log10(tcga.pvals1)>i)),dim(tcga.pvals1))
-colnames(tcga.cohens_d) <- colnames(tcga.ps) <- toupper(names(tcga.sp.panel))
+tcga.ps <- array(rowSums(sapply(c(25,50,100,200),function(i)-log10(tcga.pvals1)>i)),dim(tcga.pvals1)) # t-test
+colnames(tcga.ps) <- toupper(names(tcga.sp.panel))
 rownames(tcga.ps) <- rownames(tcga.pvals1)
 
-df.cd <- data.frame(tcga.cohens_d) %>%
-  tibble::rownames_to_column("subtype") %>%
-  mutate(subtype=factor(subtype,levels=c("hr","dp","tnbc","her2"))) %>%
-  tidyr::gather("type","cohens_d",-1) 
-levels(df.cd$subtype) <- subtypes
-  
 df.txt <- data.frame(tcga.ps) %>%
   tibble::rownames_to_column("subtype") %>%
   mutate(subtype=factor(subtype,levels=c("hr","dp","tnbc","her2"))) %>%
   tidyr::gather("type","txt",-1) %>%
   mutate(txt=sapply(txt,function(i)paste(rep("*",i),collapse=""))) %>%
-  mutate(is.hr=factor(subtype %in% c("hr","dp"),levels=c("TRUE","FALSE"))) 
+  mutate(is.hr=factor(subtype %in% c("hr","dp"),levels=c("TRUE","FALSE")))  %>%
+  mutate()
     
 levels(df.txt$subtype) <- subtypes
 
 dfx.tcga <- tcga.sps %>% 
-  left_join(df.txt,by=c("subtype","type")) %>%
-  left_join(df.cd,by=c("subtype","type")) %>%
-  mutate(txt = paste0(txt,"\n(",cohens_d,")"))
+  mutate(type = sub("[-/]",".",type)) %>%
+  left_join(df.txt,by=c("subtype","type"))
+dfx1 <- dfx.tcga %>% select(-2) %>% unique()
+```
+
+
+#### [Fig S1G-I] Violin plot
+```{r}
+xx <- source(file.path(src_dir,"utils","subtype_violin_plot.R"))
 ```
 
 
 ```{r}
-subtype_violin <- function(dfx,mod){
-  p0 <- ggplot(dfx %>% filter(type==mod),aes(x=subtype,y=sp,fill=is.hr)) +
-    geom_hline(yintercept=0) + 
-    geom_violin(position="dodge") +
-    scale_fill_manual(values=brewer.pal(4,"YlOrBr")[c(3,1)])+
-    theme_bw() +
-    ggtitle(paste0("Spearman within ",mod)) +
-    geom_text(aes(x=subtype,label=txt),y=1.1,size=4) + 
-    scale_y_continuous(limits=c(-.7,1)) +
-    ylim(c(-.7,1.2)) +
-    xlab("") +
-    ylab("Spearman correlation") +
-    theme(legend.position="none",
-          plot.title=element_text(hjust=0.5,size=12),
-          text = element_text(size = 12),
-          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))   
-  print(p0)
-}
+p <- subtype_violin_within(dfx=dfx.tcga,mod="ERS") + ggtitle("ERS (TCGA)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_ers_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
 
-subtype_violin_bt <- function(dfx,mod){
-  if(!mod %in% c("TNFa/NFkB", "IFN-I", "APM/TC")){
-    stop("mod should be one of the immune module names")
-  }
-  mods <- paste0("APMTC",1:3)
-  mod1 <- mods[match(mod,c("TNFa/NFkB", "IFN-I", "APM/TC"))]
-  p0 <- ggplot(dfx %>% filter(type==paste0("ERS.",mod1)),
-               aes(x=subtype,y=sp,fill=is.hr)) +
-    geom_hline(yintercept=0) + 
-    geom_violin(position="dodge") +
-    scale_fill_manual(values=brewer.pal(4,"YlOrBr")[c(3,1)])+
-    theme_bw() +
-    ggtitle(paste0("Cor, ERS vs ",mod)) +
-    geom_text(aes(x=subtype,label=txt),y=1.1,size=4) + 
-    scale_y_continuous(limits=c(-.7,1)) +
-    ylim(c(-.7,1.2)) +
-    xlab("") +
-    ylab("Spearman correlation") +
-    theme(legend.position="none",
-          plot.title=element_text(hjust=0.5,size=12),
-          text = element_text(size = 12),
-          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))   
-  print(p0)
-}
+p <- subtype_violin_within(dfx=dfx.tcga,mod="IMMUNE") + ggtitle("Pan-immune (TCGA)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_imms_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
 
-# subtype_violin(dfx=dfx.tcga,mod="ERS")
-# subtype_violin_bt(mod="TNFa/NFkB")
-# subtype_violin_bt(mod="IFN-I")
-# subtype_violin_bt(mod="APM/TC")
+p <- subtype_violin_within(dfx=dfx.tcga,mod="TNFA.NFKB") + ggtitle("TNFa/NFkB (TCGA)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_imm1_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
 
-if(1){
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_ers.pdf"),width=3,height=6)
-  subtype_violin(dfx=dfx.tcga,mod="ERS")
-  dev.off()
+p <- subtype_violin_within(dfx=dfx.tcga,mod="IFN.I") + ggtitle("IFN-I (TCGA)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_imm2_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
 
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_apmtc1.pdf"),width=3,height=6)
-  subtype_violin(dfx=dfx.tcga,mod="TNFa/NFkB")
-  dev.off()
-
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_apmtc2.pdf"),width=3,height=6)
-  subtype_violin(dfx=dfx.tcga,mod="IFN-I")
-  dev.off()
-
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_apmtc3.pdf"),width=3,height=6)
-  subtype_violin(dfx=dfx.tcga,mod="APM/TC")
-  dev.off()
-}
-  
-if(1){
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_ers_apmtc1.pdf"),width=3,height=6)
-  subtype_violin_bt(dfx=dfx.tcga,mod="TNFa/NFkB")
-  dev.off()
-
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_ers_apmtc2.pdf"),width=3,height=6)
-  subtype_violin_bt(dfx=dfx.tcga,mod="IFN-I")
-  dev.off()
-
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_ers_apmtc3.pdf"),width=3,height=6)
-  subtype_violin_bt(dfx=dfx.tcga,mod="APM/TC")
-  dev.off()
-}
+p <- subtype_violin_within(dfx=dfx.tcga,mod="APM.TC") + ggtitle("APM/TC (TCGA)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_imm3_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
 ```
 
-## METABRIC
-### Spearman correlation
+
+```{r}
+p <- subtype_violin_between(dfx=dfx.tcga,mod="TNFA.NFKB") + ggtitle("ERS vs Pan-immune (TCGA)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_ers_imm1_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
+
+p <- subtype_violin_between(dfx=dfx.tcga,mod="TNFA.NFKB") + ggtitle("ERS vs TNFa/NFkB (TCGA)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_ers_imm1_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
+
+p <- subtype_violin_between(dfx=dfx.tcga,mod="IFN.I") + ggtitle("ERS vs IFN-I (TCGA)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_ers_imm2_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
+
+p <- subtype_violin_between(dfx=dfx.tcga,mod="APM.TC") + ggtitle("ERS vs APM/TC (TCGA)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_ers_imm3_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
+```
+
+### METABRIC
+#### Spearman correlation
 ```{r}
 meta.sp.panel <- list()
 meta.sp.panel$ers <- 
   meta.sp.panel[["TNFa/NFkB"]] <- 
   meta.sp.panel[["IFN-I"]] <- 
   meta.sp.panel[["APM/TC"]] <- 
-  meta.sp.panel$ers.apmtc1 <- 
-  meta.sp.panel$ers.apmtc2 <- 
-  meta.sp.panel$ers.apmtc3 <- list()
+  meta.sp.panel[["Immune"]] <- 
+  meta.sp.panel$ers.imm1 <- 
+  meta.sp.panel$ers.imm2 <- 
+  meta.sp.panel$ers.imm3 <-   
+  meta.sp.panel$ers.imm <- list()
 
-meta.sp.panel <- meta.sp.panel[7:1]
-meta.cohens_d <- meta.pvals1 <- meta.pvals <- list()
+meta.sp.panel <- meta.sp.panel[9:1]
+meta.pvals1 <- meta.pvals <- list()
 
-compute_cohens_d <- function(data, hypothesized_mean=0) {
-  # Calculate sample mean and sample standard deviation
-  sample_mean <- mean(data)
-  sample_sd <- sd(data)
-  
-  # Calculate sample size
-  n <- length(data)
-  
-  # Calculate Cohen's d
-  cohen_d <- (sample_mean - hypothesized_mean) / sample_sd
-  
-  return(cohen_d)
-}
+imm.gns <- unlist(mod.gns[-1])
+
+n <- 406 # number of SCC within ERS
 
 for(cl in smpl.class[c(1,3,4,2)]){
 	tmp <- meta.sp[[cl]]
 	diag(tmp) <- NA
-	
-	g1 <- tmp[mod.gns[["ERS"]],mod.gns[["ERS"]]] # 378
-	g1 <- g1[lower.tri(g1)]
-	g2 <- tmp[mod.gns[["TNFa/NFkB"]],mod.gns[["TNFa/NFkB"]]] # 9045
-	g2 <- g2[lower.tri(g2)]
-	g3 <- tmp[mod.gns[["IFN-I"]],mod.gns[["IFN-I"]]] # 9045
-	g3 <- g3[lower.tri(g3)]
-	g4 <- tmp[mod.gns[["APM/TC"]],mod.gns[["APM/TC"]]] # 9045
-	g4 <- g4[lower.tri(g4)]
-	g5 <- as.vector(tmp[mod.gns[["ERS"]],mod.gns[["TNFa/NFkB"]]])# 3780
-	g6 <- as.vector(tmp[mod.gns[["ERS"]],mod.gns[["IFN-I"]]])# 3780
-	g7 <- as.vector(tmp[mod.gns[["ERS"]],mod.gns[["APM/TC"]]])# 3780
 
+	g1 <- tmp[mod.gns[["ERS"]],mod.gns[["ERS"]]] 
+	g1 <- g1[lower.tri(g1)] # 406
+	g2 <- tmp[mod.gns[["TNFa/NFkB"]],mod.gns[["TNFa/NFkB"]]] 
+	g2 <- g2[lower.tri(g2)] # 1378
+	g3 <- tmp[mod.gns[["IFN-I"]],mod.gns[["IFN-I"]]] 
+	g3 <- g3[lower.tri(g3)] # 378
+	g4 <- tmp[mod.gns[["APM/TC"]],mod.gns[["APM/TC"]]] 
+	g4 <- g4[lower.tri(g4)] # 10153
+	g5 <- tmp[imm.gns,imm.gns]
+	g5 <- g5[lower.tri(g5)] # 25200
+	g6 <- as.vector(tmp[mod.gns[["ERS"]],mod.gns[["TNFa/NFkB"]]])# 1537
+	g7 <- as.vector(tmp[mod.gns[["ERS"]],mod.gns[["IFN-I"]]])# 841
+	g8 <- as.vector(tmp[mod.gns[["ERS"]],mod.gns[["APM/TC"]]])# 4147
+	g9 <- as.vector(tmp[mod.gns[["ERS"]],imm.gns]) # 6525
+
+	set.seed(1)	
+	g1 <- sample(g1,n)
+	g2 <- sample(g2,n)
+	g3 <- sample(g3,n)
+	g4 <- sample(g4,n)
+	g5 <- sample(g5,n)
+	g6 <- sample(g6,n)
+	g7 <- sample(g7,n)
+	g8 <- sample(g8,n)
+	g9 <- sample(g9,n)	
+	
 	meta.sp.panel$ers[[cl]] <- g1
 	meta.sp.panel[["TNFa/NFkB"]][[cl]] <- g2
-	meta.sp.panel[["IFN-I"]][[cl]] <- g3
+	meta.sp.panel[["IFN-I"]][[cl]] <- g3 
 	meta.sp.panel[["APM/TC"]][[cl]] <- g4
-	meta.sp.panel$ers.apmtc1[[cl]] <- g5
-	meta.sp.panel$ers.apmtc2[[cl]] <- g6
-	meta.sp.panel$ers.apmtc3[[cl]] <- g7
-	pvals <- sapply(1:7,function(i){
+	meta.sp.panel[["Immune"]][[cl]] <- g5
+	meta.sp.panel$ers.imm1[[cl]] <- g6 
+	meta.sp.panel$ers.imm2[[cl]] <- g7 
+	meta.sp.panel$ers.imm3[[cl]] <- g8 
+	meta.sp.panel$ers.imm[[cl]] <- g9 
+	
+	pvals <- sapply(1:9,function(i){
 	  obj <- get(paste0("g",i))
 	  wilcox.test(obj)$p.value
 	})
-	pvals1 <- sapply(1:7,function(i){
+	pvals1 <- sapply(1:9,function(i){
 	  obj <- get(paste0("g",i))
 	  t.test(obj)$p.value
 	})
 
-	cohend <- sapply(1:7,function(i){
-	  obj <- get(paste0("g",i))
-	  compute_cohens_d(obj)
-	})
-
+	names(pvals) <- names(pvals1) <- c("ERS","TNFA/NFKB","IFN-I","APM/TC","IMMUNE","ERS.IMM1","ERS.IMM2","ERS.IMM3","ERS.IMM")
+	
 	meta.pvals[[cl]] <- pvals
 	meta.pvals1[[cl]] <- pvals1
-	meta.cohens_d[[cl]] <- cohend
 }
 
-meta.pvals <- do.call(rbind,meta.pvals)
-meta.pvals1 <- do.call(rbind,meta.pvals1)
-meta.cohens_d <- round(do.call(rbind,meta.cohens_d),2)
+meta.pvals <- do.call(rbind,meta.pvals) # wilcox
+meta.pvals1 <- do.call(rbind,meta.pvals1) # t.test
 
-meta.ps <- array(rowSums(sapply(c(10,50,250),function(i)-log10(meta.pvals1)>i)),dim(meta.pvals1))
-```
-
-#### restructure data
-```{r}
 subtypes <- c("HR+/HER2-","HR+/HER2+","HR-/HER2-","HR-/HER2+") 
 
 names(meta.sp.panel$ers) <- 
   names(meta.sp.panel[["TNFa/NFkB"]]) <- 
   names(meta.sp.panel[["IFN-I"]]) <- 
   names(meta.sp.panel[["APM/TC"]]) <- 
-  names(meta.sp.panel$ers.apmtc1) <- 
-  names(meta.sp.panel$ers.apmtc2) <- 
-  names(meta.sp.panel$ers.apmtc3) <- subtypes
+  names(meta.sp.panel[["Immune"]]) <-   
+  names(meta.sp.panel$ers.imm1) <- 
+  names(meta.sp.panel$ers.imm2) <- 
+  names(meta.sp.panel$ers.imm3) <- 
+  names(meta.sp.panel$ers.imm) <- subtypes
 
 meta.sps <- lapply(seq(meta.sp.panel),function(i){
   n <- names(meta.sp.panel)[[i]]
@@ -529,114 +473,98 @@ meta.sps <- meta.sps %>%
   mutate(subtype=subtypes[as.numeric(subtype)]) %>%
   mutate(subtype=factor(subtype,levels=subtypes)) %>%
   mutate(type=toupper(type))
-```
 
-### Violin plot
-```{r}
-meta.ps <- array(rowSums(sapply(c(10,50,250),function(i)-log10(meta.pvals1)>i)),dim(meta.pvals1))
-colnames(meta.cohens_d) <- colnames(meta.ps) <- toupper(names(meta.sp.panel))
+meta.ps <- array(rowSums(sapply(c(25,50,100,200),function(i)-log10(meta.pvals1)>i)),dim(meta.pvals1)) # t-test
+colnames(meta.ps) <- toupper(names(meta.sp.panel))
 rownames(meta.ps) <- rownames(meta.pvals1)
 
-df.cd <- data.frame(meta.cohens_d) %>%
-  tibble::rownames_to_column("subtype") %>%
-  mutate(subtype=factor(subtype,levels=c("hr","dp","tnbc","her2"))) %>%
-  tidyr::gather("type","cohens_d",-1) 
-levels(df.cd$subtype) <- subtypes
-  
 df.txt <- data.frame(meta.ps) %>%
   tibble::rownames_to_column("subtype") %>%
   mutate(subtype=factor(subtype,levels=c("hr","dp","tnbc","her2"))) %>%
   tidyr::gather("type","txt",-1) %>%
   mutate(txt=sapply(txt,function(i)paste(rep("*",i),collapse=""))) %>%
-  mutate(is.hr=factor(subtype %in% c("hr","dp"),levels=c("TRUE","FALSE"))) 
+  mutate(is.hr=factor(subtype %in% c("hr","dp"),levels=c("TRUE","FALSE")))  %>%
+  mutate()
     
 levels(df.txt$subtype) <- subtypes
 
 dfx.meta <- meta.sps %>% 
-  left_join(df.txt,by=c("subtype","type")) %>%
-  left_join(df.cd,by=c("subtype","type")) %>%
-  mutate(txt = paste0(txt,"\n(",cohens_d,")"))
-
-if(1){
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_ers.pdf"),width=3,height=6)
-  subtype_violin(dfx=dfx.meta,mod="ERS")
-  dev.off()
-
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_apmtc1.pdf"),width=3,height=6)
-  subtype_violin(dfx=dfx.meta,mod="TNFa/NFkB")
-  dev.off()
-
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_apmtc2.pdf"),width=3,height=6)
-  subtype_violin(dfx=dfx.meta,mod="IFN-I")
-  dev.off()
-
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_apmtc3.pdf"),width=3,height=6)
-  subtype_violin(dfx=dfx.meta,mod="APM/TC")
-  dev.off()
-}
-  
-if(1){
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_ers_apmtc1.pdf"),width=3,height=6)
-  subtype_violin_bt(dfx=dfx.meta,mod="TNFa/NFkB")
-  dev.off()
-
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_ers_apmtc2.pdf"),width=3,height=6)
-  subtype_violin_bt(dfx=dfx.meta,mod="IFN-I")
-  dev.off()
-
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_ers_apmtc3.pdf"),width=3,height=6)
-  subtype_violin_bt(dfx=dfx.meta,mod="APM/TC")
-  dev.off()
-}
+  mutate(type = sub("[-/]",".",type)) %>%
+  left_join(df.txt,by=c("subtype","type"))
+dfx1 <- dfx.meta %>% select(-2) %>% unique()
 ```
 
-## ESR1 expression per subclass
+
+#### [Fig S1G-I] Violin plot
+```{r}
+p <- subtype_violin_within(dfx=dfx.meta,mod="ERS") + ggtitle("ERS (METABRIC)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_ers_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
+
+p <- subtype_violin_within(dfx=dfx.meta,mod="IMMUNE") + ggtitle("Pan-immune (METABRIC)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_imms_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
+
+p <- subtype_violin_within(dfx=dfx.meta,mod="TNFA.NFKB") + ggtitle("TNFa/NFkB (METABRIC)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_imm1_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
+
+p <- subtype_violin_within(dfx=dfx.meta,mod="IFN.I") + ggtitle("IFN-I (METABRIC)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_imm2_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
+
+p <- subtype_violin_within(dfx=dfx.meta,mod="APM.TC") + ggtitle("APM/TC (METABRIC)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_imm3_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
+```
+
+
+```{r}
+p <- subtype_violin_between(dfx=dfx.meta,mod="TNFA.NFKB") + ggtitle("ERS vs Pan-immune (METABRIC)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_ers_imm1_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
+
+p <- subtype_violin_between(dfx=dfx.meta,mod="TNFA.NFKB") + ggtitle("ERS vs TNFa/NFkB (METABRIC)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_ers_imm1_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
+
+p <- subtype_violin_between(dfx=dfx.meta,mod="IFN.I") + ggtitle("ERS vs IFN-I (METABRIC)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_ers_imm2_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
+
+p <- subtype_violin_between(dfx=dfx.meta,mod="APM.TC") + ggtitle("ERS vs APM/TC (METABRIC)")
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_ers_imm3_v2.pdf"),width=3,height=6)
+print(p)
+dev.off()
+```
+
+###  ESR1 expression per subclass
 ```{r}
 threshold1 <- function(predict, response) {
     perf <- ROCR::performance(ROCR::prediction(predict, response), "sens", "spec")
     df <- data.frame(cut = perf@alpha.values[[1]], sens = perf@x.values[[1]], spec = perf@y.values[[1]])
     df[which.max(df$sens + df$spec), "cut"]
-}
+} 
 ```
 
-### TCGA
+#### 1D/2D plots - functions
 ```{r}
-ers.exp <- tcga.m3[match("ESR1",tcga.syms),unlist(tcga.ids[c(1,3,2,4)])]
-cls <- factor(rep(subtypes,sapply(tcga.ids[c(1,3,2,4)],length)),
-	levels=subtypes)
-
-df.t <- data.frame(esr1=ers.exp,class=cls)
-
-exp.pos <- (df.t %>% filter(class %in% c("HR+/HER2-","HR+/HER2+")))$esr1
-exp.neg <- (df.t %>% filter(class %in% c("HR-/HER2-","HR-/HER2+")))$esr1
-
-predictions <- c(exp.pos,exp.neg)
-labels <- rep(c(1,-1),c(length(exp.pos),length(exp.neg)))
-
-th <- threshold1(predictions,labels)
-
-if(0){
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_esr1_bc_subtypes_v2.pdf"),width=4,height=7)
-  p <- ggplot(df.t,aes(class,esr1)) + 
-  	geom_violin(fill='grey80') +
-  	geom_jitter(height = 0, width = 0.2,size=.5) +
-  	labs(title="ESR1 gene (TCGA)",
-          x ="", y = "Expression (log, z-score)") +
-    geom_hline(yintercept = th,linetype="dashed") +
-    theme_bw() +
-    theme(plot.title=element_text(hjust=0.5),
-          text = element_text(size = 15),
-          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))    
-  
-  p
-  dev.off()
-}
+xx <- source(file.path(src_dir,"utils","plot_module_scores.R"))
 ```
 
-### METABRIC
+
+### [Fig S2E] METABRIC
 ```{r}
-ers.exp <- meta.m3[match("ESR1",meta.syms),unlist(meta.ids[c(1,3,2,4)])]
-cls <- factor(rep(subtypes,sapply(meta.ids[c(1,3,4,2)],length)),
+ers.exp <- meta.m3[match("ESR1",meta.syms),unlist(meta.ids[c("hr","dp","tnbc","her2")])]
+cls <- factor(rep(subtypes,sapply(meta.ids[c("hr","dp","tnbc","her2")],length)),
 	levels=subtypes)
 
 df.m <- data.frame(esr1=ers.exp,class=cls)
@@ -644,90 +572,81 @@ df.m <- data.frame(esr1=ers.exp,class=cls)
 exp.pos <- (df.m %>% filter(class %in% c("HR+/HER2-","HR+/HER2+")))$esr1
 exp.neg <- (df.m %>% filter(class %in% c("HR-/HER2-","HR-/HER2+")))$esr1
 
+
 predictions <- c(exp.pos,exp.neg)
 labels <- rep(c(1,-1),c(length(exp.pos),length(exp.neg)))
 
 th <- threshold1(predictions,labels)
 
-if(0){
-  pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_esr1_bc_subtypes.pdf"),width=4,height=7)
-  p <- ggplot(df.m,aes(class,esr1)) + 
-  	geom_violin(fill='grey80') +
-  	geom_jitter(height = 0, width = 0.2,size=.5) +
-  	labs(title="ESR1 gene (METABRIC)",
-          x ="", y = "Expression (log, z-score)") +
-    geom_hline(yintercept = th,linetype="dashed") +
-    theme_bw() +
-    theme(plot.title=element_text(hjust=0.5),
-          text = element_text(size = 15),
-          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))    
-  p
-  dev.off()
-}
+pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_esr1_bc_subtypes.pdf"),width=4,height=7)
+p <- ggplot(df.m,aes(class,esr1)) + 
+	geom_violin(fill='grey80') +
+	geom_jitter(height = 0, width = 0.2,size=.5) +
+	labs(title="ESR1 gene (METABRIC)",
+        x ="", y = "Expression (log, z-score)") +
+  geom_hline(yintercept = th,linetype="dashed") +
+  theme_bw() +
+  theme(plot.title=element_text(hjust=0.5),
+        text = element_text(size = 15),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))    
+p
+dev.off()
 ```
+
 ## GSVA
 
 ### Run gsva for both TCGA and METABRIC
 ```{r}
-gs <- lapply(sigs,identity)
-mthds <- c("gsva", "ssgsea", "zscore", "plage")
+gs <- lapply(c(sigs,mod.gns[-1]),identity)
+
+mth <- "zscore"
 
 lst.tcga.gs <- lst.meta.gs <- list()
 
+lst.tcga.gs[[mth]] <-  GSVA::gsva(expr = tcga.m3[tested.gns,],
+             gset.idx.list = gs, method = mth,
+             min.sz = 10, max.sz = 500, kcdf = "Gaussian")
+
+lst.meta.gs[[mth]] <-  GSVA::gsva(expr = meta.m3[tested.gns,],
+             gset.idx.list = gs, method = mth,
+             min.sz = 10, max.sz = 500, kcdf = "Gaussian")
+
 if(0){
-  for(mth in mthds){
-    lst.tcga.gs[[mth]] <-  GSVA::gsva(expr = tcga.m3[tested.gns,],
-                 gset.idx.list = gs, method = mth,
-                 min.sz = 10, max.sz = 500, kcdf = "Gaussian")
-    
-    lst.meta.gs[[mth]] <-  GSVA::gsva(expr = meta.m3[tested.gns,],
-                 gset.idx.list = gs, method = mth,
-                 min.sz = 10, max.sz = 500, kcdf = "Gaussian")
-  }
-  save(lst.tcga.gs,lst.meta.gs,file=file.path(obj_dir,"1-4_prep","tcga_meta_ssgsea_scores.rda"))
+  # save(lst.tcga.gs,lst.meta.gs,file=file.path(obj_dir,"1-4_prep","tcga_meta_ssgsea_scores_v2.rda"))
+  save(lst.tcga.gs,lst.meta.gs,file=file.path(obj_dir,"1-4_prep","tcga_meta_ssgsea_scores_zscore.rda"))  
 }else{
-  load(file=file.path(obj_dir,"1-4_prep","tcga_meta_ssgsea_scores.rda"))
-}
-if(0){
-  identical(rownames(df.t),colnames(lst.tcga.gs[[mth]])) # NO
-  
-  ## tcga
-  esr <- df.t$esr1
-  aers1 <- t(lst.tcga.gs[[1]])[rownames(df.t),"ERS"]
-  ers3 <- t(lst.tcga.gs[[3]])[rownames(df.t),"ERS"]  
-  boxplot(esr ~ df.t$class)
-  plot(ers1,ers3)
-  
-  ## meta
-  esr <- df.m$esr1
-  ers1 <- t(lst.meta.gs[[1]])[rownames(df.m),"ERS"]
-  ers3 <- t(lst.meta.gs[[3]])[rownames(df.m),"ERS"]  
-  boxplot(ers ~ df.m$class)
-  plot(esr,ers)
-  plot(ers1,ers3)
-  
-  cors.t <- sapply(mthds,function(mth){
-    esr <- df.t$esr1
-    cor(esr,t(lst.tcga.gs[[mth]])[rownames(df.t),])
-  })
-  
-  cors.m <- sapply(mthds,function(mth){
-    esr <- df.m$esr1
-    cor(esr,t(lst.meta.gs[[mth]])[rownames(df.m),])
-  })
-  rownames(cors.t) <- rownames(cors.m) <- names(sigs)
-  
-  round(cors.t,3)
-  round(cors.m,3)
+  x <- load(file.path(obj_dir,"1-4_prep","tcga_meta_ssgsea_scores_zscore.rda"))  
 }
 ```
 
-### 1D/2D plots - functions
+### [Fig S1F] ERS vs CC
 ```{r}
-xx <- source(file.path(src_dir,"plot_module_scores.R"))
+df.gs <- t(lst.tcga.gs[["zscore"]])  %>% 
+  as.data.frame() %>%
+  tibble::rownames_to_column("smpl")
+names(df.t) <- c("ESR1","class")
+df.t1 <- df.t %>% 
+  tibble::rownames_to_column("smpl") %>% 
+  left_join(df.gs,by="smpl") %>%
+  filter(class == "HR+/HER2-")
+
+scc <- round(cor(df.t1$ERS,df.t1$CC,method="spearman"),2)
+
+dc <- densCols(df.t1[,c("ERS","CC")])
+
+##
+pdf(file.path(fig_dir,"2_prep_tcga","tcga_ers_vs_cc_hr.pdf"),width=7,height=7)
+par(mar=c(5,5,3,3))
+plot(df.t1[,"ERS"], df.t1[,"CC"],pch=20,col=dc,
+     main=paste0("ERS vs CC (HR+/HER2-,TCGA)"),
+     xlab="ERS (GSVA z-score)",ylab="CC (GSVA z-score)")
+text(-7,-18,paste0("SCC=",scc))
+dev.off()
 ```
 
 ### TCGA - GSVA plot
+
+#### ESR1 threshold
 ```{r}
 esr1.exp <- tcga.m3[match("ESR1",tcga.syms),unlist(tcga.ids[c(1,3,2,4)])]
 
@@ -743,9 +662,7 @@ exp.neg <- (df2 %>% filter(mod %in% c("HR-/HER2-","HR-/HER2+")))$ESR1
 predictions <- c(exp.pos,exp.neg)
 labels <- rep(c(1,-1),c(length(exp.pos),length(exp.neg)))
 pred <- prediction(predictions,labels)
-
 perf <- performance(pred, "tpr", "fpr")
-perf
 
 th <- threshold1(predictions,labels) # threshold for ESR1
 ``` 
@@ -756,7 +673,6 @@ tcga.gs <- lst.tcga.gs[["zscore"]] # gsva or zscore
 df0 <- data.frame(t(tcga.gs)) %>% tibble::rownames_to_column("id")
 df1 <- data.frame(id=unlist(tcga.ids),mod=rep(names(tcga.ids),sapply(tcga.ids,length))) %>%
   left_join(df0,by="id") %>%
-  # rename(ERS="ers") %>%
   mutate(mod=factor(mod,levels=c("hr","dp","tnbc","her2"))) %>%
   mutate(is.hr=factor(mod %in% c("hr","dp"),levels=c("TRUE","FALSE"))) %>%
   left_join(df2[c(1,3)],by="id")
@@ -770,11 +686,15 @@ labels <- rep(c(1,-1),c(length(exp.pos),length(exp.neg)))
 pred <- prediction(predictions,labels)
 
 perf <- performance(pred, "tpr", "fpr")
-perf
 
-th.ers <- threshold1(predictions,labels) # threshold for ESR1
+auc_perf <- ROCR::performance(pred,"auc")
+auroc <- auc_perf@y.values[[1]]
 
-##
+th.ers <- threshold1(predictions,labels) # threshold for ERS
+```
+
+
+```{r}
 x.th <- "ESR1"
 exp.pos <- (df1 %>% filter(mod %in% c("HR+/HER2-","HR+/HER2+")))[[x.th]]
 exp.neg <- (df1 %>% filter(mod %in% c("HR-/HER2-","HR-/HER2+")))[[x.th]]
@@ -793,51 +713,41 @@ df1 <- df1 %>%
   mutate(esr.pos = ESR1 > th.esr1)
 ```
 
+#### [Fig. 1C] ESR1 gene exprssion
 
 ```{r}
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_violin_ers.pdf"),width=4,height=8)
-my_plot_d1(data=df1,x1="ERS")
-dev.off()
-
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_violin_apmtc1.pdf"),width=4,height=8)
-my_plot_d1(data=df1,x1="TNFa.NFkB")
-dev.off()
-
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_violin_apmtc2.pdf"),width=4,height=8)
-my_plot_d1(data=df1,x1="IFN.I")
-dev.off()
-
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_violin_apmtc3.pdf"),width=4,height=8)
-my_plot_d1(data=df1,x1="APM.TC")
+p <- my_plot_d1(data=df1,x1="ESR1") + ggtitle("ESR1 gene (TCGA)") + ylab("Expression (log, z-score)")
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_violin_esr1.pdf"),width=4,height=8)
+print(p)
 dev.off()
 ```
-
-
+#### [Fig. 1D] ESR1 gene vs ERS module
 ```{r}
-# pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_esr1_vs_ers_v2.pdf"),width=7,height=7)
-# my_plot_d2_th2(data=df1,x1="ESR1",x2="ERS")
-# dev.off()
-# 
-# pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_apmtc1.pdf"),width=7,height=7)
-# my_plot_d2_th(data=df1,x1="ERS",x2="TNFa.NFkB")
-# dev.off()
-# 
-# pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_apmtc2.pdf"),width=7,height=7)
-# my_plot_d2_th(data=df1,x1="ERS",x2="IFN.I")
-# dev.off()
-# 
-# pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_apmtc3.pdf"),width=7,height=7)
-# my_plot_d2_th(data=df1,x1="ERS",x2="APM.TC")
-# dev.off()
-```
+lm1 <- lm(ERS ~ ESR1,data=df1 %>% filter(!ers.pos))
+lm2 <- lm(ERS ~ ESR1,data=df1 %>% filter(ers.pos))
+p.val1 <- paste0("p=",signif(summary(lm1)$coefficients[2,4],3))
+r.sq1 <- paste0("Adj.R^2=",signif(summary(lm1)$adj.r.squared,3))
+p.val2 <- paste0("p=",signif(summary(lm2)$coefficients[2,4],3))
+r.sq2 <- paste0("Adj.R^2=",signif(summary(lm2)$adj.r.squared,3))
 
-#### between immune modules
+txt1 <- data.frame(x=-2,y=2,label=paste0("ERS-low:\n",p.val1,"\n",r.sq1),ers.pos=TRUE)
+txt2 <- data.frame(x=0.7,y=-6,label=paste0("ERS-high:\n",p.val2,"\n",r.sq2),ers.pos=FALSE)
+txt <- rbind(txt1,txt2)
+
+p <- my_plot_d3_th(data=df1,x1="ESR1",x2="ERS",draw.th=T,x.th="ESR1") +
+  geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
+
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_esr1_vs_ers_v3.pdf"),width=7,height=7)
+print(p)
+dev.off()
+```
+#### [Fig. 1F] between immune modules
 ```{r}
 ers.pos <- (df1 %>% filter(mod %in% c("HR+/HER2-","HR+/HER2+")))$ERS
 ers.neg <- (df1 %>% filter(mod %in% c("HR-/HER2-","HR-/HER2+")))$ERS
 
-lm1 <- lm(APM.TC ~ TNFa.NFkB,data=df1 %>% filter(ers.pos))
-lm2 <- lm(APM.TC ~ TNFa.NFkB,data=df1 %>% filter(!ers.pos))
+lm1 <- lm(APM.TC ~ TNFa.NFkB, data=df1 %>% filter(ers.pos))
+lm2 <- lm(APM.TC ~ TNFa.NFkB, data=df1 %>% filter(!ers.pos))
 p.val1 <- paste0("p=",signif(summary(lm1)$coefficients[2,4],3))
 r.sq1 <- paste0("Adj.R^2=",signif(summary(lm1)$adj.r.squared,3))
 p.val2 <- paste0("p=",signif(summary(lm2)$coefficients[2,4],3))
@@ -848,9 +758,9 @@ txt2 <- data.frame(x=7,y=-15,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.po
 txt <- rbind(txt1,txt2)
 
 p <- my_plot_d3(data=df1,x1="TNFa.NFkB",x2="APM.TC",draw.th=F,x.th="ERS",split.lm=TRUE)+
-  geom_text(data=txt,aes(x=x,y=y,label=label,color=ers.pos),size=5)
+  geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_apmtc1_vs_apmtc3_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_imm1_vs_imm3_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -869,13 +779,14 @@ txt2 <- data.frame(x=7,y=-18,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.po
 txt <- rbind(txt1,txt2)
 
 p <- my_plot_d3(data=df1,x1="IFN.I",x2="APM.TC",draw.th=F,x.th="ERS")+
-  geom_text(data=txt,aes(x=x,y=y,label=label,color=ers.pos),size=5)
+  geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_apmtc2_vs_apmtc3_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_imm2_vs_imm3_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
 
+#### [Fig. 1G] between immune modules
 
 ```{r}
 lm1 <- lm(IFN.I ~ TNFa.NFkB,data=df1 %>% filter(ers.pos))
@@ -890,12 +801,13 @@ txt2 <- data.frame(x=7,y=-10,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.po
 txt <- rbind(txt1,txt2)
 
 p <- my_plot_d3_th(data=df1,x1="TNFa.NFkB",x2="IFN.I",draw.th=T,x.th="ERS") +
-  geom_text(data=txt,aes(x=x,y=y,label=label,color=ers.pos),size=5)
+  geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_apmtc1_vs_apmtc2_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_imm1_vs_imm2_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
+
 ```{r}
 th <- function(x){
   exp.pos <- (df1 %>% filter(mod %in% c("HR+/HER2-","HR+/HER2+")))[[x]]
@@ -962,19 +874,13 @@ p <- ggplot(df1,aes(x=cat,y=APM.TC)) +
     axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
     legend.position="none")  
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_violin_apmtc.pdf"),width=5,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_violin_imm.pdf"),width=5,height=7)
 print(p)
 dev.off()
 
 ```
-#### multivariate regression
-```{r}
-lm1 <- lm(APM.TC ~ TNFa.NFkB + IFN.I + TNFa.NFkB:IFN.I,data=df1)
-summary(lm1)$coefficient
-```
 
-
-#### between ERS and ESR1
+#### [Fig. 1D] between ERS and ESR1
 
 ```{r}
 exp.pos <- (df1 %>% filter(mod %in% c("HR+/HER2-","HR+/HER2+")))$ESR1
@@ -994,11 +900,11 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3(data=df1,x1="ESR1",x2="ERS",draw.th=TRUE,x.th="ESR1",split.lm=TRUE) +
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_esr1_vs_ers_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_esr1_vs_ers_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
-#### between ERS and immune modules
+#### [Fig. 1E] between ERS and immune modules
 
 ```{r}
 lm1 <- lm(TNFa.NFkB ~ ERS,data=df1 %>% filter(ers.pos))
@@ -1013,9 +919,9 @@ txt2 <- data.frame(x=-10,y=-10,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.
 txt <- rbind(txt1,txt2)
 
 p <- my_plot_d3(data=df1,x1="ERS",x2="TNFa.NFkB",draw.th=TRUE,x.th="ERS",split.lm=TRUE)+
-  geom_text(data=txt,aes(x=x,y=y,label=label,color=ers.pos),size=5)
+  geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_apmtc1_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_imm1_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -1033,9 +939,9 @@ txt2 <- data.frame(x=-10,y=-10,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.
 txt <- rbind(txt1,txt2)
 
 p <- my_plot_d3(data=df1,x1="ERS",x2="IFN.I",draw.th=TRUE,x.th="ERS",split.lm=TRUE)+
-  geom_text(data=txt,aes(x=x,y=y,label=label,color=ers.pos),size=5)
+  geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_apmtc2_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_imm2_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -1053,129 +959,23 @@ txt2 <- data.frame(x=-10,y=-10,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.
 txt <- rbind(txt1,txt2)
 
 p <- my_plot_d3(data=df1,x1="ERS",x2="APM.TC",draw.th=TRUE,x.th="ERS",split.lm=TRUE)+
-  geom_text(data=txt,aes(x=x,y=y,label=label,color=ers.pos),size=5)
+  geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_apmtc3_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_imm3_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
-
-### test
+#### multivariate regression
 ```{r}
-# p <- my_plot_d2_col(data=df1,x1="TNFa.NFkB",x2="IFN.I",x.col="APM.TC") +
-#     geom_smooth(method="lm",color=1,span=.8) +
-#     geom_text(data=txt,aes(x=x,y=y,label=label),size=5)
-
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_d2_apmtc-col_v2.pdf"),width=7,height=7)
-print(p)
-dev.off()
-
-# pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_d2_ers-col.pdf"),width=7,height=7)
-# my_plot_d2_col(data=df1,x1="TNFa.NFkB",x2="IFN.I",x.col="ERS")
-# dev.off()
+lm1 <- lm(APM.TC ~ TNFa.NFkB + IFN.I + TNFa.NFkB:IFN.I,data=df1)
+summary(lm1)$coefficient
 ```
 
-```{r}
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_apmtc3.pdf"),width=7,height=7)
-my_plot_d2_col(data=df1,x1="ERS",x2="APM.TC",x.col="TNFa.NFkB")
-dev.off()
-
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_apmtc3.pdf"),width=7,height=7)
-my_plot_d2_col(data=df1,x1="ERS",x2="APM.TC",x.col="IFN.I")
-dev.off()
-
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_apmtc3.pdf"),width=7,height=7)
-my_plot_d2_col(data=df1,x1="ERS",x2="IFN.I",x.col="APM.TC")
-dev.off()
-```
-
-
-```{r}
-ucols <- slcols[,"immune"]
-ucols[1] <- "grey80"
-ucols[4] <- brewer.pal(4,"Accent")[4]
-names(ucols) <- levels(df1$idx)
-
-my_plot_v <- function(data, x1,x2,ucols){
-  p <- ggplot(data,aes(x=!!sym(x1),y=!!sym(x2))) +
-    geom_violin(position="dodge",aes(fill=!!sym(x1))) +
-    scale_fill_manual(values=ucols) +
-    geom_jitter(width=.2,size=.5) +
-    theme_bw() +
-    xlab("") +
-    ylab(paste0(x2," activity")) +
-    ggtitle("") +
-    theme(plot.title=element_text(hjust=0.5),
-      text = element_text(size = 20),
-      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
-      legend.position="none")  
-  
-  return(p)  
-}
-```
-
-
-```{r}
-th1 <- th(df1,"TNFa.NFkB")
-th2 <- th(df1,"IFN.I")
-
-idx <- (df1$TNF > th1) + (df1$IFN > th2) * 2
-df1$idx <- factor(idx,labels=c("Neg","TNF","IFN","DP"))
-
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_vs_tnf-ifn","tcga_ers.pdf"),width=7,height=7)
-my_plot_v(data=df1,x1="idx",x2="ERS",ucols=ucols)
-dev.off()
-
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_vs_tnf-ifn","tcga_apmtc.pdf"),width=7,height=7)
-my_plot_v(data=df1,x1="idx",x2="APM.TC",ucols=ucols)
-dev.off()
-
-
-```
-
-```{r}
-th1 <- th(df1,"ERS")
-th2 <- th(df1,"IFN.I")
-
-idx <- (df1$ERS > th1) + (df1$IFN > th2) * 2 
-idx <- factor(idx,labels=c("Neg","ERS","IFN","ERS.IFN"))
-
-##
-boxplot(df1$APM.TC ~ idx,las=2)
-boxplot(df1$ERS ~ idx)
-```
-
-```{r}
-th1 <- th(df1,"ERS")
-th2 <- th(df1,"IFN.I")
-th3 <- th(df1,"TNFa.NFkB")
-
-idx <- (df1$ERS > th1) + (df1$IFN > th2) * 2 + (df1$TNF > th3) * 4
-idx <- factor(idx,levels=c(1,3,5,7,2,4,6,8)-1)
-levels(idx) <- c("Neg","ERS","IFN","ERS.IFN","TNF","ERS.TNF","TNF.IFN","ERS.IFN.TNF")[c(1,3,5,7,2,4,6,8)]
-
-boxplot(df1$APM.TC ~ idx,las=2)
-boxplot(df1$ERS ~ idx,las=2)
-
-lm1 <- lm(APM.TC ~ IFN.I + TNFa.NFkB, data=df1)
-summary(lm1)
-
-lm2 <- lm(APM.TC ~ ERS + IFN.I + TNFa.NFkB, data=df1)
-summary(lm2)
-
-lm3 <- lm(ERS ~ APM.TC + IFN.I + TNFa.NFkB, data=df1)
-summary(lm3)
-
-summary(lm1)$adj.r.squared # 0.627
-summary(lm2)$adj.r.squared # 0.647
-```
-
-```{r}
-ids <- tapply(df1$id,df1$idx,identity)
-saveRDS(ids,file.path(obj_dir,"1-4_prep","tcga_pts-ids-immune.rds"))
-```
+#### network analysis - TBD
 
 ### METABRIC - GSVA plot
+
+#### ESR1 threshold
 ```{r}
 esr1.exp <- meta.m3[match("ESR1",meta.syms),unlist(meta.ids[c(1,3,2,4)])]
 
@@ -1185,7 +985,16 @@ df2 <- data.frame(id=unlist(meta.ids),mod=rep(names(meta.ids),sapply(meta.ids,le
   mutate(mod=factor(mod,levels=c("hr","dp","tnbc","her2")))
 levels(df2$mod) <- c("HR+/HER2-","HR+/HER2+","HR-/HER2-","HR-/HER2+")
 
-```
+exp.pos <- (df2 %>% filter(mod %in% c("HR+/HER2-","HR+/HER2+")))$ESR1
+exp.neg <- (df2 %>% filter(mod %in% c("HR-/HER2-","HR-/HER2+")))$ESR1
+
+predictions <- c(exp.pos,exp.neg)
+labels <- rep(c(1,-1),c(length(exp.pos),length(exp.neg)))
+pred <- prediction(predictions,labels)
+perf <- performance(pred, "tpr", "fpr")
+
+th <- threshold1(predictions,labels) # threshold for ESR1
+``` 
 
 ```{r}
 meta.gs <- lst.meta.gs[["zscore"]] # gsva or zscore
@@ -1193,13 +1002,11 @@ meta.gs <- lst.meta.gs[["zscore"]] # gsva or zscore
 df0 <- data.frame(t(meta.gs)) %>% tibble::rownames_to_column("id")
 df1 <- data.frame(id=unlist(meta.ids),mod=rep(names(meta.ids),sapply(meta.ids,length))) %>%
   left_join(df0,by="id") %>%
-  # rename(ERS="ers") %>%
   mutate(mod=factor(mod,levels=c("hr","dp","tnbc","her2"))) %>%
+  mutate(is.hr=factor(mod %in% c("hr","dp"),levels=c("TRUE","FALSE"))) %>%
   left_join(df2[c(1,3)],by="id")
 levels(df1$mod) <- c("HR+/HER2-","HR+/HER2+","HR-/HER2-","HR-/HER2+")
-```
 
-```{r}
 exp.pos <- (df1 %>% filter(mod %in% c("HR+/HER2-","HR+/HER2+")))$ERS
 exp.neg <- (df1 %>% filter(mod %in% c("HR-/HER2-","HR-/HER2+")))$ERS
 
@@ -1208,11 +1015,15 @@ labels <- rep(c(1,-1),c(length(exp.pos),length(exp.neg)))
 pred <- prediction(predictions,labels)
 
 perf <- performance(pred, "tpr", "fpr")
-perf
 
-th.ers <- threshold1(predictions,labels) # threshold for ESR1
+auc_perf <- ROCR::performance(pred,"auc")
+auroc <- auc_perf@y.values[[1]]
 
-##
+th.ers <- threshold1(predictions,labels) # threshold for ERS
+```
+
+
+```{r}
 x.th <- "ESR1"
 exp.pos <- (df1 %>% filter(mod %in% c("HR+/HER2-","HR+/HER2+")))[[x.th]]
 exp.neg <- (df1 %>% filter(mod %in% c("HR-/HER2-","HR-/HER2+")))[[x.th]]
@@ -1225,35 +1036,60 @@ if(x.th %in% c("ERS","ESR1")){
   labels <- -labels
 }
 th.esr1 <- threshold1(predictions,labels)
-```
 
-```{r}
-df1 <- df1 %>%  
+df1 <- df1 %>%
   mutate(ers.pos = ERS > th.ers) %>%
-  mutate(esr1.pos = ESR1 > th.esr1) %>%
-  mutate(is.hr = mod %in% c("HR+/HER2-","HR+/HER2+"))
+  mutate(esr.pos = ESR1 > th.esr1)
 ```
 
-#### between immune modules
-```{r}
-ers.pos <- (df1 %>% filter(mod %in% c("HR+/HER2-","HR+/HER2+")))$ERS
-ers.neg <- (df1 %>% filter(mod %in% c("HR-/HER2-","HR-/HER2+")))$ERS
+#### [Fig. S2E] ESR1 gene exprssion
 
-lm1 <- lm(APM.TC ~ TNFa.NFkB,data=df1 %>% filter(ers.pos))
-lm2 <- lm(APM.TC ~ TNFa.NFkB,data=df1 %>% filter(!ers.pos))
+```{r}
+p <- my_plot_d1(data=df1,x1="ESR1") + ggtitle("ESR1 gene (METABRIC)") + ylab("Expression (log, z-score)")
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_violin_esr1.pdf"),width=4,height=8)
+print(p)
+dev.off()
+```
+#### [Fig. S2F] ESR1 gene vs ERS module
+```{r}
+lm1 <- lm(ERS ~ ESR1,data=df1 %>% filter(!ers.pos))
+lm2 <- lm(ERS ~ ESR1,data=df1 %>% filter(ers.pos))
 p.val1 <- paste0("p=",signif(summary(lm1)$coefficients[2,4],3))
 r.sq1 <- paste0("Adj.R^2=",signif(summary(lm1)$adj.r.squared,3))
 p.val2 <- paste0("p=",signif(summary(lm2)$coefficients[2,4],3))
 r.sq2 <- paste0("Adj.R^2=",signif(summary(lm2)$adj.r.squared,3))
 
-txt1 <- data.frame(x=-12,y=10,label=paste0("ERS-high:\n",p.val1,"\n",r.sq1),ers.pos=TRUE)
+txt1 <- data.frame(x=-2,y=2,label=paste0("ERS-low:\n",p.val1,"\n",r.sq1),ers.pos=TRUE)
+txt2 <- data.frame(x=0.7,y=-6,label=paste0("ERS-high:\n",p.val2,"\n",r.sq2),ers.pos=FALSE)
+txt <- rbind(txt1,txt2)
+
+p <- my_plot_d3_th(data=df1,x1="ESR1",x2="ERS",draw.th=T,x.th="ESR1") +
+  geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
+
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_esr1_vs_ers_v3.pdf"),width=7,height=7)
+print(p)
+dev.off()
+```
+#### [Fig. S2K] between immune modules
+```{r}
+ers.pos <- (df1 %>% filter(mod %in% c("HR+/HER2-","HR+/HER2+")))$ERS
+ers.neg <- (df1 %>% filter(mod %in% c("HR-/HER2-","HR-/HER2+")))$ERS
+
+lm1 <- lm(APM.TC ~ TNFa.NFkB, data=df1 %>% filter(ers.pos))
+lm2 <- lm(APM.TC ~ TNFa.NFkB, data=df1 %>% filter(!ers.pos))
+p.val1 <- paste0("p=",signif(summary(lm1)$coefficients[2,4],3))
+r.sq1 <- paste0("Adj.R^2=",signif(summary(lm1)$adj.r.squared,3))
+p.val2 <- paste0("p=",signif(summary(lm2)$coefficients[2,4],3))
+r.sq2 <- paste0("Adj.R^2=",signif(summary(lm2)$adj.r.squared,3))
+
+txt1 <- data.frame(x=-10,y=10,label=paste0("ERS-high:\n",p.val1,"\n",r.sq1),ers.pos=TRUE)
 txt2 <- data.frame(x=7,y=-15,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.pos=FALSE)
 txt <- rbind(txt1,txt2)
 
 p <- my_plot_d3(data=df1,x1="TNFa.NFkB",x2="APM.TC",draw.th=F,x.th="ERS",split.lm=TRUE)+
-  geom_text(data=txt,aes(x=x,y=y,label=label,color=ers.pos),size=5)
+  geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_apmtc1_vs_apmtc3_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_imm1_vs_imm3_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -1267,18 +1103,19 @@ r.sq1 <- paste0("Adj.R^2=",signif(summary(lm1)$adj.r.squared,3))
 p.val2 <- paste0("p=",signif(summary(lm2)$coefficients[2,4],3))
 r.sq2 <- paste0("Adj.R^2=",signif(summary(lm2)$adj.r.squared,3))
 
-txt1 <- data.frame(x=-10,y=10,label=paste0("ERS-high:\n",p.val1,"\n",r.sq1),ers.pos=TRUE)
+txt1 <- data.frame(x=-7,y=10,label=paste0("ERS-high:\n",p.val1,"\n",r.sq1),ers.pos=TRUE)
 txt2 <- data.frame(x=7,y=-18,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.pos=FALSE)
 txt <- rbind(txt1,txt2)
 
 p <- my_plot_d3(data=df1,x1="IFN.I",x2="APM.TC",draw.th=F,x.th="ERS")+
-  geom_text(data=txt,aes(x=x,y=y,label=label,color=ers.pos),size=5)
+  geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_apmtc2_vs_apmtc3_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_imm2_vs_imm3_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
 
+#### [Fig. S2L] between immune modules
 
 ```{r}
 lm1 <- lm(IFN.I ~ TNFa.NFkB,data=df1 %>% filter(ers.pos))
@@ -1288,17 +1125,18 @@ r.sq1 <- paste0("Adj.R^2=",signif(summary(lm1)$adj.r.squared,3))
 p.val2 <- paste0("p=",signif(summary(lm2)$coefficients[2,4],3))
 r.sq2 <- paste0("Adj.R^2=",signif(summary(lm2)$adj.r.squared,3))
 
-txt1 <- data.frame(x=-12,y=10,label=paste0("ERS-high:\n",p.val1,"\n",r.sq1),ers.pos=TRUE)
-txt2 <- data.frame(x=7,y=-10,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.pos=FALSE)
+txt1 <- data.frame(x=-10,y=10,label=paste0("ERS-high:\n",p.val1,"\n",r.sq1),ers.pos=TRUE)
+txt2 <- data.frame(x=9,y=-8,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.pos=FALSE)
 txt <- rbind(txt1,txt2)
 
 p <- my_plot_d3_th(data=df1,x1="TNFa.NFkB",x2="IFN.I",draw.th=T,x.th="ERS") +
-  geom_text(data=txt,aes(x=x,y=y,label=label,color=ers.pos),size=5)
+  geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_apmtc1_vs_apmtc2_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_imm1_vs_imm2_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
+
 ```{r}
 th <- function(x){
   exp.pos <- (df1 %>% filter(mod %in% c("HR+/HER2-","HR+/HER2+")))[[x]]
@@ -1365,41 +1203,37 @@ p <- ggplot(df1,aes(x=cat,y=APM.TC)) +
     axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
     legend.position="none")  
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_violin_apmtc.pdf"),width=5,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_violin_imm.pdf"),width=5,height=7)
 print(p)
 dev.off()
 
 ```
-#### multivariate regression
-```{r}
-lm1 <- lm(APM.TC ~ TNFa.NFkB + IFN.I + TNFa.NFkB:IFN.I,data=df1)
-summary(lm1)$coefficient
-```
-#### between ERS and ESR1
+
+#### [Fig. S2F] between ERS and ESR1
 
 ```{r}
 exp.pos <- (df1 %>% filter(mod %in% c("HR+/HER2-","HR+/HER2+")))$ESR1
 exp.neg <- (df1 %>% filter(mod %in% c("HR-/HER2-","HR-/HER2+")))$ESR1
   
-lm1 <- lm(ERS ~ ESR1,data=df1 %>% filter(esr1.pos))
-lm2 <- lm(ERS ~ ESR1,data=df1 %>% filter(!esr1.pos))
+lm1 <- lm(ERS ~ ESR1,data=df1 %>% filter(esr.pos))
+lm2 <- lm(ERS ~ ESR1,data=df1 %>% filter(!esr.pos))
 p.val1 <- paste0("p=",signif(summary(lm1)$coefficients[2,4],3))
 r.sq1 <- paste0("Adj.R^2=",signif(summary(lm1)$adj.r.squared,3))
 p.val2 <- paste0("p=",signif(summary(lm2)$coefficients[2,4],3))
 r.sq2 <- paste0("Adj.R^2=",signif(summary(lm2)$adj.r.squared,3))
 
 txt1 <- data.frame(x=.8,y=-6,label=paste0("ERS-high:\n",p.val1,"\n",r.sq1),esr.pos=TRUE)
-txt2 <- data.frame(x=-2,y=2,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),esr.pos=FALSE)
+txt2 <- data.frame(x=-1.5,y=2,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),esr.pos=FALSE)
 txt <- rbind(txt1,txt2)
 
 p <- my_plot_d3(data=df1,x1="ESR1",x2="ERS",draw.th=TRUE,x.th="ESR1",split.lm=TRUE) +
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_esr1_vs_ers_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_esr1_vs_ers_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
-#### between ERS and immune modules
+#### [Fig. S2G] between ERS and immune modules
 
 ```{r}
 lm1 <- lm(TNFa.NFkB ~ ERS,data=df1 %>% filter(ers.pos))
@@ -1409,14 +1243,14 @@ r.sq1 <- paste0("Adj.R^2=",signif(summary(lm1)$adj.r.squared,3))
 p.val2 <- paste0("p=",signif(summary(lm2)$coefficients[2,4],3))
 r.sq2 <- paste0("Adj.R^2=",signif(summary(lm2)$adj.r.squared,3))
 
-txt1 <- data.frame(x=5,y=15,label=paste0("ERS-high:\n",p.val1,"\n",r.sq1),ers.pos=TRUE)
-txt2 <- data.frame(x=-10,y=-10,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.pos=FALSE)
+txt1 <- data.frame(x=5,y=10,label=paste0("ERS-high:\n",p.val1,"\n",r.sq1),ers.pos=TRUE)
+txt2 <- data.frame(x=-7,y=-10,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.pos=FALSE)
 txt <- rbind(txt1,txt2)
 
 p <- my_plot_d3(data=df1,x1="ERS",x2="TNFa.NFkB",draw.th=TRUE,x.th="ERS",split.lm=TRUE)+
-  geom_text(data=txt,aes(x=x,y=y,label=label,color=ers.pos),size=5)
+  geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_ers_vs_apmtc1_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_ers_vs_imm1_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -1429,14 +1263,14 @@ r.sq1 <- paste0("Adj.R^2=",signif(summary(lm1)$adj.r.squared,3))
 p.val2 <- paste0("p=",signif(summary(lm2)$coefficients[2,4],3))
 r.sq2 <- paste0("Adj.R^2=",signif(summary(lm2)$adj.r.squared,3))
 
-txt1 <- data.frame(x=5,y=15,label=paste0("ERS-high:\n",p.val1,"\n",r.sq1),ers.pos=TRUE)
-txt2 <- data.frame(x=-10,y=-10,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.pos=FALSE)
+txt1 <- data.frame(x=5,y=12,label=paste0("ERS-high:\n",p.val1,"\n",r.sq1),ers.pos=TRUE)
+txt2 <- data.frame(x=-7,y=-8,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.pos=FALSE)
 txt <- rbind(txt1,txt2)
 
 p <- my_plot_d3(data=df1,x1="ERS",x2="IFN.I",draw.th=TRUE,x.th="ERS",split.lm=TRUE)+
-  geom_text(data=txt,aes(x=x,y=y,label=label,color=ers.pos),size=5)
+  geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_ers_vs_apmtc2_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_ers_vs_imm2_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -1449,55 +1283,18 @@ r.sq1 <- paste0("Adj.R^2=",signif(summary(lm1)$adj.r.squared,3))
 p.val2 <- paste0("p=",signif(summary(lm2)$coefficients[2,4],3))
 r.sq2 <- paste0("Adj.R^2=",signif(summary(lm2)$adj.r.squared,3))
 
-txt1 <- data.frame(x=5,y=15,label=paste0("ERS-high:\n",p.val1,"\n",r.sq1),ers.pos=TRUE)
-txt2 <- data.frame(x=-10,y=-10,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.pos=FALSE)
+txt1 <- data.frame(x=5,y=18,label=paste0("ERS-high:\n",p.val1,"\n",r.sq1),ers.pos=TRUE)
+txt2 <- data.frame(x=-7,y=-12,label=paste0("ERS-low:\n",p.val2,"\n",r.sq2),ers.pos=FALSE)
 txt <- rbind(txt1,txt2)
 
 p <- my_plot_d3(data=df1,x1="ERS",x2="APM.TC",draw.th=TRUE,x.th="ERS",split.lm=TRUE)+
-  geom_text(data=txt,aes(x=x,y=y,label=label,color=ers.pos),size=5)
+  geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_ers_vs_apmtc3_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_ers_vs_imm3_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
 
-#### discard
-```{r}
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_violin_ers.pdf"),width=4,height=8)
-my_plot_d1(data=df1,x1="ERS")
-dev.off()
-
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_violin_apmtc1.pdf"),width=4,height=8)
-my_plot_d1(data=df1,x1="TNFa/NFkB")
-dev.off()
-
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_violin_apmtc2.pdf"),width=4,height=8)
-my_plot_d1(data=df1,x1="IFN-I")
-dev.off()
-
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_violin_apmtc3.pdf"),width=4,height=8)
-my_plot_d1(data=df1,x1="APM/TC")
-dev.off()
-```
-
-
-```{r}
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_esr1_vs_ers.pdf"),width=7,height=7)
-my_plot_d2(data=df1,x1="ESR1",x2="ERS")
-dev.off()
-
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_ers_vs_apmtc1.pdf"),width=7,height=7)
-my_plot_d2(data=df1,x1="ERS",x2="TNFa/NFkB")
-dev.off()
-
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_ers_vs_apmtc2.pdf"),width=7,height=7)
-my_plot_d2(data=df1,x1="ERS",x2="IFN-I")
-dev.off()
-
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_ers_vs_apmtc3.pdf"),width=7,height=7)
-my_plot_d2(data=df1,x1="ERS",x2="APM/TC")
-dev.off()
-```
 
 
 
