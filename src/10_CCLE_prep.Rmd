@@ -1,0 +1,181 @@
+---
+title: "6. Looking into the correlation in different cancer types"
+output: html_notebook
+---
+
+## Initial setup
+
+### Load libraries
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+})
+```
+
+### Set paths
+```{r}
+proj_dir="~/Dropbox (HMS)/_projects_/B06 03 HR-APM/"
+
+ccle_dir <- file.path(proj_dir,"data","ccle")
+fig_dir <- file.path(proj_dir,"manuscript","figs")
+obj_dir <- file.path(proj_dir,"manuscript","RData")
+```
+
+## Load expresssion data (downloaded form cBioPortal)
+```{r}
+## expression matrix
+ma.fns <- file.path(ccle_dir,
+          c("data_RNA_Seq_expression_median.txt",
+            "data_RNA_Seq_mRNA_median_all_sample_Zscores.txt",
+            "data_RNA_Seq_mRNA_median_Zscores.txt"))
+
+ccle.mat1 <- read.table(ma.fns[1],sep="\t",header=T)
+ccle.mat2 <- read.table(ma.fns[2],sep="\t",header=T)
+ccle.mat3 <- read.table(ma.fns[3],sep="\t",header=T)
+
+ccle.mat1[1:5,1:5]
+```
+### Check column names
+Column names of the three matrices are identical.
+```{r}
+identical(colnames(ccle.mat1),colnames(ccle.mat2)) # true
+identical(colnames(ccle.mat1),colnames(ccle.mat3)) # true
+```
+## Pre-processing data
+### Compare three expression matrices
+```{r}
+ccle.m1 <- as.matrix(ccle.mat1[,-1])
+ccle.m2 <- as.matrix(ccle.mat2[,-1])
+ccle.m3 <- as.matrix(ccle.mat3[,-1])
+
+dim(ccle.m1) # 56318 genes, 1156 samples
+dim(ccle.m2) # 56318 genes, 1156 samples
+dim(ccle.m3) # 56318 genes, 1156 samples
+
+identical(ccle.mat1$Hugo_Symbol,ccle.mat2$Hugo_Symbol) # true
+```
+
+
+```{r}
+syms12 <- intersect(ccle.mat1$Hugo_Symbol,ccle.mat2$Hugo_Symbol)
+i=4
+plot(ccle.m1[match(syms12,ccle.mat1$Hugo_Symbol)[i],],
+     ccle.m2[match(syms12,ccle.mat2$Hugo_Symbol)[i],],
+     pch=".")
+plot(ccle.m1[match(syms12,ccle.mat1$Hugo_Symbol)[i],],
+     ccle.m3[match(syms12,ccle.mat2$Hugo_Symbol)[i],],
+     pch=".")
+plot(ccle.m3[match(syms12,ccle.mat1$Hugo_Symbol)[i],],
+     ccle.m2[match(syms12,ccle.mat2$Hugo_Symbol)[i],],
+     pch=".")
+```
+## Load Clinical data
+```{r}
+cl <- readLines(file.path(ccle_dir,"data_clinical_sample.txt"))[-(1:4)]
+clt <- do.call(rbind,strsplit(cl,split="\t"))
+cn <- clt[1,]
+ccle.clinical <- data.frame(clt[-1,],stringsAsFactors=F)
+names(ccle.clinical) <- cn
+#ccle.clinical$PATIENT_ID <- gsub("-",".",ccle.clinical$PATIENT_ID)
+
+used.ids <- colnames(ccle.m3)
+if(0){
+  table(used.ids %in% ccle.clinical$PATIENT_ID) ## all samples' records exist in clinical metadata
+}
+
+"%!in%" <- function(x, y) !(x %in% y)
+used.ids[used.ids %!in% ccle.clinical$PATIENT_ID] ## 3 samples' records don't exist in clinical metadata: "X253JBV_URINARY_TRACT" "X253J_URINARY_TRACT"   "X127399_SOFT_TISSUE"
+
+```
+
+## Disease status
+```{r}
+## filter for only breast cancer cell line in clinical data and ranseq data
+ccle.clinical <- ccle.clinical %>% 
+  filter(PATIENT_ID %in% used.ids) %>% 
+  filter(TUMOR_TYPE == "breast")
+length(ccle.clinical$SAMPLE_ID) # 56 cell lines
+
+ccle.mat1.breast<- ccle.mat1[,(colnames(ccle.mat1) %in% ccle.clinical$SAMPLE_ID)]
+ccle.mat2.breast<- ccle.mat2[,(colnames(ccle.mat2) %in% ccle.clinical$SAMPLE_ID)]
+ccle.mat3.breast<- ccle.mat3[,(colnames(ccle.mat3) %in% ccle.clinical$SAMPLE_ID)]
+
+colnames(ccle.mat1.breast) <- sub("_.*", "", colnames(ccle.mat1.breast))
+colnames(ccle.mat2.breast) <- sub("_.*", "", colnames(ccle.mat2.breast))
+colnames(ccle.mat3.breast) <- sub("_.*", "", colnames(ccle.mat3.breast))
+cellline.id <- colnames(ccle.mat1.breast)
+```
+
+## load receptor status, PAM50 subtype data
+```{r}
+sub.ccle <- read.csv(file.path(ccle_dir,"CCLE cell line annotations.csv")) %>%
+  filter(Cell.line.name %in% cellline.id) %>% 
+  filter(PAM50.mRNA != "NON") #HMC18 HMEL don't have PAM50 designations
+dim(sub.ccle) #total of 54 cell lines with PAM50 subtypes
+
+final.cellline.id<- sub.ccle$Cell.line.name
+
+ccle.mat1.breast<- ccle.mat1.breast[,(colnames(ccle.mat1.breast) %in% final.cellline.id)]
+ccle.mat2.breast<- ccle.mat2.breast[,(colnames(ccle.mat2.breast) %in% final.cellline.id)]
+ccle.mat3.breast<- ccle.mat3.breast[,(colnames(ccle.mat3.breast) %in% final.cellline.id)]
+```
+
+## PAM50 categorization
+```{r}
+unique(sub.ccle$PAM50.mRNA) # 4 categories of PAM50
+
+ccle.her2.ids <- (sub.ccle %>% 
+                    filter(PAM50.mRNA == "Her2amp"))$Cell.line.name # 9
+
+ccle.bl.ids <- (sub.ccle %>% 
+                  filter(PAM50.mRNA == "Basal-like"))$Cell.line.name # 26
+
+ccle.lumb.ids <- (sub.ccle %>% 
+                    filter(PAM50.mRNA == "Luminal B"))$Cell.line.name # 9
+
+ccle.luma.ids <- (sub.ccle %>% 
+                    filter(PAM50.mRNA == "Luminal A"))$Cell.line.name # 10
+
+ccle.all.ids <- sub.ccle$Cell.line.name # 54 cell lines in total
+
+ccle.ids <- list(
+  her2=ccle.her2.ids,
+  bl=ccle.bl.ids,
+  luma=ccle.luma.ids,
+  lumb=ccle.lumb.ids,
+  all = ccle.all.ids
+)
+sapply(ccle.ids,length)
+```
+
+
+```{r}
+ccle.m1.breast <- as.matrix(ccle.mat1.breast)
+ccle.m2.breast <- as.matrix(ccle.mat2.breast)
+ccle.m3.breast <- as.matrix(ccle.mat3.breast)
+
+dim(ccle.m1.breast) # 56318 genes, 54 samples
+dim(ccle.m2.breast) # 56318 genes, 54 samples
+dim(ccle.m3.breast) # 56318 genes, 54 samples
+```
+
+
+```{r}
+table(table(ccle.mat1$Hugo))
+table(table(ccle.mat2$Hugo)) # not unique
+ccle.syms <- ccle.mat1$Hugo_Symbol ## genes whose expression is measured
+```
+
+## Save data in rda file
+```{r}
+save(ccle.ids,
+     final.cellline.id,
+     ccle.clinical,
+     ccle.syms,
+     ccle.m1.breast,
+     ccle.m2.breast,
+     ccle.m3.breast,
+     sub.ccle,
+     file=file.path(obj_dir,"9_ccle","ccle_RNA-seq.rda"))
+```
+
