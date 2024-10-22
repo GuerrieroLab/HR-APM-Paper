@@ -1,6 +1,6 @@
 ---
 title: "7. MDACC cohort analysis"
-output: html_notebook
+# output: html_notebook
 ---
 
 ## Initial setting
