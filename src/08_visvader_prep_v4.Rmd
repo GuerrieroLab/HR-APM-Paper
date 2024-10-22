@@ -218,7 +218,7 @@ dev.off()
 
 ##### [Fig S4D] BC subtypes
 ```{r}
-seurat_myeloid2@meta.data$subtype <- factor(seurat_myeloid2@meta.data$subtype,levels=c("HR","HER2","TNBC"),labels=c("HR+","HER2","TNBC"))
+seurat_myeloid2@meta.data$subtype <- factor(seurat_myeloid2@meta.data$subtype,levels=c("HR","HER2","TNBC"),labels=c("HR+","HER2+","TNBC"))
 
 p <- DimPlot(seurat_myeloid2, group.by = "subtype", label=FALSE, 
              reduction = "umap",raster=FALSE, pt.size=0.1) +
@@ -282,7 +282,7 @@ dev.off()
 
 ##### [Fig S4C] BC subtypes
 ```{r}
-seurat_lymph_clean1@meta.data$subtype <- factor(seurat_lymph_clean1@meta.data$subtype,levels=c("HR","HER2","TNBC"),labels=c("HR+","HER2","TNBC"))
+seurat_lymph_clean1@meta.data$subtype <- factor(seurat_lymph_clean1@meta.data$subtype,levels=c("HR","HER2","TNBC"),labels=c("HR+","HER2+,"TNBC"))
 
 png(file.path(fig_dir1, "umap_lymphoid_subtype_v3.png"), width = 700,height = 700)
 p <- DimPlot(seurat_lymph_clean1, group.by = "subtype", label = FALSE, reduction = "umap", raster=FALSE, pt.size=0.1) +
@@ -346,7 +346,8 @@ dev.off()
 ##### [Fig 2A-left] subtype on UMAP
 
 ```{r}
-seurat_sct1@meta.data$subtype <- factor(seurat_sct1@meta.data$subtype,levels=c("HR","HER2","TNBC"),labels=c("HR+","HER2","TNBC"))
+seurat_sct1@meta.data$subtype <- factor(seurat_sct1@meta.data$subtype,levels=c("HR","HER2","TNBC"),labels=c("HR+","HER2+","TNBC"))
+# wp@meta.data$subtype <- factor(wp@meta.data$subtype,levels=c("HR","HER2","TNBC"),labels=c("HR+","HER2+","TNBC"))
 
 png(file.path(fig_dir1, "umap_wp_subtype.png"), width = 700,height = 700)
 p <- DimPlot(seurat_sct1, group.by = "subtype", label = FALSE, reduction = "umap", raster=FALSE, pt.size=0.05) +
@@ -510,7 +511,7 @@ dev.off()
 ## Save Seurat Objects
 ```{r}
 # Save the Seurat objects with updated metadata
-saveRDS(seurat_sct1, file.path(obj_dir1, "visvader_seurat_all_subtypes_v3.rds"))
+saveRDS(wp, file.path(obj_dir1, "visvader_seurat_all_subtypes_v3.rds"))
 saveRDS(seurat_lymph_clean1, file.path(obj_dir1, "visvader_seurat_lymph_v3.rds"))
 saveRDS(seurat_myeloid2, file.path(obj_dir1, "visvader_seurat_mye_v3.rds"))
 ```
