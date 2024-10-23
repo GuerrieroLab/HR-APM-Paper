@@ -1,0 +1,157 @@
+---
+title: "pipeline_ers_apm_v1"
+author: "Kenichi Shimada"
+date: '2023-07-30'
+output: 
+  # html_notebook: 
+    # toc: yes
+---
+
+## Load library
+```{r}
+suppressPackageStartupMessages({
+  # library(DESeq2)
+  library(dplyr)
+  library(tibble)  
+  library(org.Hs.eg.db)
+})
+```
+
+## Normalized mat
+```{r}
+data_dir1 <- file.path(data_dir,"dfbcc","bulk_RNAseq")
+obj_dir1 <- file.path(obj_dir,"11_dfbcc_txn")
+norm.mat <- read.csv(file.path(data_dir1,"normalized_counts_30-522712517.csv"))
+norm.gids <- norm.mat$ID
+```
+
+## Raw mat
+```{r}
+raw_dir <- file.path(data_dir1,"raw")
+dirs <- c("Counts","hit-counts")
+
+d1 <- file.path(raw_dir,dirs[1])
+d2 <- file.path(raw_dir,dirs[2])
+
+fns1 <- dir(d1)
+txts1 <- lapply(fns1,function(fn){
+  fn1 <- file.path(d1,fn)
+  txt <- read.table(fn1,sep="\t",header=T)
+  smpl <- sub("\\..+","",fn)
+
+  return(txt)
+})
+
+fns2 <- dir(d2)
+txts2 <- lapply(fns2,function(fn){
+  fn2 <- file.path(d2,fn)
+  txt <- read.table(fn2,sep="\t",header=T)
+  smpl <- sub("\\..+","",fn)
+
+  return(txt)
+})
+
+## all same dimensions
+sapply(txts1,dim)
+sapply(txts2,dim)
+
+## gids are the same
+gids1 <- sapply(txts1,function(x)x[[1]])
+gids1 <- apply(gids1,1,unique)  
+
+gids2 <- sapply(txts2,function(x)x[[1]])
+gids2 <- apply(gids2,1,unique)  
+
+idx <- match(gids1,gids2)
+
+##
+mat1 <- do.call(cbind,lapply(txts1,function(x)x[7]))
+mat2 <- do.call(cbind,lapply(txts2,function(x)x[7]))
+colnames(mat2)[1:2] <- paste0(colnames(mat2)[1:2],".1")
+
+rownames(mat1) <- gids1
+rownames(mat2) <- gids2
+
+mat <- cbind(mat1,mat2[gids1,])
+```
+
+```{r}
+idx <- (rowSums(mat) > 10 * ncol(mat)) # 22479 TRUE
+cpm1 <- mat1[idx,]
+cpm2 <- mat2[gids1[idx],]
+cpm <- mat[idx,]
+
+mor_normalization = function(data){
+
+  # take the log
+  log_data = log(data) 
+  
+  # find the psuedo-references per sample by taking the geometric mean
+  log_data = log_data %>% 
+               rownames_to_column('gene') %>% 
+               mutate (gene_averages = rowMeans(log_data)) %>% 
+               filter(gene_averages != "-Inf")
+  
+  # the last columns is the pseudo-reference column 
+  pseudo_column = ncol(log_data)
+  
+  # where to stop before the pseudo column 
+  before_pseduo = pseudo_column - 1
+  
+  # find the ratio of the log data to the pseudo-reference
+  ratios = sweep(log_data[,2:before_pseduo], 1, log_data[,pseudo_column], "-")
+  
+  # find the median of the ratios
+  sample_medians = apply(ratios, 2, median)
+  
+  # convert the median to a scaling factor
+  scaling_factors = exp(sample_medians)
+  
+  # use scaling factors to scale the original data
+  manually_normalized = sweep(data, 2, scaling_factors, "/")
+  return(manually_normalized)
+}
+```
+
+
+```{r}
+norm1 <- mor_normalization(cpm1)
+norm2 <- mor_normalization(cpm2)
+n.cpm <- cbind(norm1,norm2)  
+```
+
+
+```{r}
+df <- log2(n.cpm+1)
+rn <- rownames(df)
+
+a <- mget(rn,org.Hs.egENSEMBL2EG,ifnotfound=NA) # 17801
+has.encoded <- sapply(a,function(x)!any(is.na(x))) # 17801 TRUE, 4678 FALSE
+
+df.1 <- df[has.encoded,]
+
+all.syms <- sapply(rownames(df.1),function(x){
+  eids <- a[[x]]
+  lab <- unlist(mget(eids,org.Hs.egSYMBOL))
+  is.loc <- grepl("^LOC",lab)
+  if(any(is.loc) & !all(is.loc)){
+    lab <- lab[!is.loc]
+  }
+  lab <- paste(lab,collapse=";")
+})
+dup.syms <- names(which(table(all.syms)==2))
+is.dup <- sapply(dup.syms,function(x)which(all.syms==x))[2,]
+
+df.1 <- df.1[-is.dup,]
+all.syms <- all.syms[-is.dup]
+
+## Ensemble gene ids that also have Gene Symbols
+rownames(df.1) <- all.syms
+
+saveRDS(df.1,file.path(obj_dir1,"txn_32_hr_v2.rds"))
+# df <- readRDS(file.path("/Users/kenichishimada/Dropbox (HMS)/_projects_/B06 03 HR-APM/manuscript/Rdata/11_dfci_txn","txn_32_hr.rds"))
+
+
+```
+
+
