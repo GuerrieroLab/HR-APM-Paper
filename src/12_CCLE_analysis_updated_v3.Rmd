@@ -205,7 +205,7 @@ groups<- cell.annotation$PAM50.mRNA
 
 ```{r}
 save(df.ccle.ct1,ccle.exp1,rc1.sub,file=file.path(obj_dir1,"ccle_expressed_genes_042424.rda"))
-xx <- load(file=file.path(obj_dir1,"ccle_expressed_genes_042424.rda"))
+# xx <- load(file=file.path(obj_dir1,"ccle_expressed_genes_042424.rda"))
 ```
 
 ## Correlation of gene expression (all samples)
@@ -469,6 +469,11 @@ cons.gns.1 <- c(cons.gns[-1],
                   APM_sub=ifn.apm))
 
 ```
+#### save `cons.gns.1`
+```{r}
+saveRDS(cons.gns.1,file.path(obj_dir2,"intrinsic_modules.rds"))
+```
+
 
 ## [Fig S6E] Pathway Enrichment (Fisher's test)
 ```{r}
