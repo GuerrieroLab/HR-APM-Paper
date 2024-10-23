@@ -48,7 +48,7 @@ sts[is.na(sts)] <- "HR+"
 wp@meta.data$subtype <- sts
 ```
 
-#### mods only for used genes
+#### mods keeping used genes in WEHI cohort only
 ```{r}
 all.gns <- rownames(wp$RNA)
 
@@ -58,18 +58,6 @@ mods <- lapply(mods1,function(gns){
 
 mod.gns <- unlist(mods)
 
-## update side colors for heatmap
-sig.lcols <- readRDS(file=file.path(obj_dir1,"../1-4_prep","sigs_sidecols.rds"))
-
-ss <- sig.lcols[,"subclass"]
-ss[ss=="white"] <- "steelblue"
-sig.lcols[,"subclass"] <- ss
-sig.lcols <- sig.lcols[,-2]
-colnames(sig.lcols) <- c("hallmark","module")
-
-##
-mod.uniq.cols <- c("steelblue",brewer.pal(3,"Accent")[c(1,3,2)])#f3756c","#7caf42","#16bcc2","#a780ba")
-names(mod.uniq.cols) <- names(mods)
 ```
 
 
@@ -96,27 +84,63 @@ st.uniq.cols <- c("#f3756c","#7caf42","#16bcc2")
 names(st.uniq.cols) <- c("HR+","HER2+","TNBC")
 ```
 
+### module colors
+```{r}
+mod.uniq.cols <- c("steelblue",brewer.pal(3,"Accent")[c(1,3,2)])#f3756c","#7caf42","#16bcc2","#a780ba")
+names(mod.cols) <- c("ERS","TNFa/NFkB","IFN-I","APM/TC")
+names(mod.uniq.cols) <- names(mods)
+
+mod.cols <- c(brewer.pal(3,"Set1")[2],brewer.pal(3,"Accent")[c(1,3,2)])
+names(mod.cols) <- c("ERS","TNFa/NFkB","IFN-I","APM/TC")
+```
+
+### side-colors
+```{r}
+## update side colors for heatmap
+sig.lcols <- readRDS(file=file.path(obj_dir1,"../1-4_prep","sigs_sidecols.rds"))
+
+ss <- sig.lcols[,"subclass"]
+ss[ss=="white"] <- "steelblue"
+sig.lcols[,"subclass"] <- ss
+sig.lcols <- sig.lcols[,-2]
+colnames(sig.lcols) <- c("hallmark","module")
+
+mod.side.cols <- sig.lcols[mod.gns,]
+```
+
+```{r}
+save(exp.ct.cols1,st.uniq.cols,mod.cols,mod.side.cols,file=file.path(obj_dir1,"color_schema.rda"))
+```
+
 ## Compute module enrichment with GSVA - `gsva_scores`
 ```{r}
 mat <- GetAssayData(wp)
 mat <- mat[rownames(mat) %in% used.all.gns, ]
-rm(wp); gc()
+```
 
-chunk_size <- 51272
-gsva_results_list <- list()
-n_cols <- ncol(mat)
 
-system.time({
-  for(i in 1:4){
-    mat_chunk <- mat[, (1:chunk_size) + chunk_size * (i - 1)]
-    ssgsea.par <- ssgseaParam(expr = mat_chunk, geneSets = mods, minSize = 15, maxSize = 500)
-    scores_chunk <- gsva(ssgsea.par)
-    gsva_results_list[[i]] <- t(scores_chunk)
-  }
-  gsva_scores <- do.call(rbind, gsva_results_list)
-})
-
-saveRDS(gsva_scores, file.path(obj_dir1, "scores_visvader_trimmed_mat_v5.rds"))
+```{r}
+if(0){
+  rm(wp); gc()
+  
+  chunk_size <- 51272
+  gsva_results_list <- list()
+  n_cols <- ncol(mat)
+  
+  system.time({
+    for(i in 1:4){
+      mat_chunk <- mat[, (1:chunk_size) + chunk_size * (i - 1)]
+      ssgsea.par <- ssgseaParam(expr = mat_chunk, geneSets = mods, minSize = 15, maxSize = 500)
+      scores_chunk <- gsva(ssgsea.par)
+      gsva_results_list[[i]] <- t(scores_chunk)
+    }
+    gsva_scores <- do.call(rbind, gsva_results_list)
+  })
+  
+  saveRDS(gsva_scores, file.path(obj_dir1, "scores_visvader_trimmed_mat_v5.rds"))
+}else{
+  gsva_scores <- readRDS(file.path(obj_dir1,"scores_visvader_trimmed_mat_v5.rds"))
+}
 ```
 
 ```{r}
@@ -127,14 +151,7 @@ if(0){
               gsva_scores[(1:chunk_size) + chunk_size*3,1])
   boxplot(ers)
 }
-
-saveRDS(gsva_scores,file.path(obj_dir1,"scores_visvader_trimmed_mat_v5.rds"))
 ```
-
-```{r}
-gsva_scores <- readRDS(file.path(obj_dir1,"scores_visvader_trimmed_mat_v5.rds"))
-```
-
 
 ```{r}
 wp@meta.data$ERS <- gsva_scores[,"ERS"]
@@ -253,8 +270,6 @@ dev.off()
 
 ### [Fig S5A -> 2E left] comparison of expression pattern of module genes
 ```{r}
-rc <- sig.lcols[mod.gns,]
-
 df.all <- do.call(cbind,lapply(lst.mean.gns,unlist))
 cor.all.gns <- cor(df.all,use="pairwise.complete.obs")
 
@@ -306,9 +321,9 @@ if(0){
     return(tmp)
   })) # 253 x 11 - scaled between 0 and 1
   
-  saveRDS(exp.gn.by.ct,file.path(obj_dir1,"mod_exp_by_ct_v3.rds"))
+  saveRDS(exp.gn.by.ct,file.path(obj_dir1,"mod_exp_by_ct_v4.rds"))
 }else{
-  exp.gn.by.ct <-readRDS(file.path(obj_dir1,"mod_exp_by_ct_v3.rds"))  
+  exp.gn.by.ct <-readRDS(file.path(obj_dir1,"mod_exp_by_ct_v4.rds"))  
 }
 
 if(0){
@@ -329,9 +344,9 @@ if(0){
   #   return(tmp)
   # }))
 
-  saveRDS(exp.gn.by.smpl,file.path(obj_dir1,"mod_exp_by_smpl_v3.rds"))
+  saveRDS(exp.gn.by.smpl,file.path(obj_dir1,"mod_exp_by_smpl_v4.rds"))
 }else{
-  exp.gn.by.smpl <-readRDS(file.path(obj_dir1,"mod_exp_by_smpl_v3.rds"))  
+  exp.gn.by.smpl <-readRDS(file.path(obj_dir1,"mod_exp_by_smpl_v4.rds"))  
 }
 ```
 
@@ -410,7 +425,7 @@ df.tum.exp <- data.frame(genes=names(tum.exp),
 #   theme(legend.position="none")
 ```
 
-#### [not used anymore] module gene exprssion in cancer cells
+#### [Fig S6X - not used] module gene exprssion in cancer cells
 ```{r}
 df.tum.exp.1 <- df.tum.exp %>%
   group_by(exp.tis) %>%
@@ -434,58 +449,6 @@ set.seed(123)
 pdf(file.path(fig_dir1,"violin_tum_expression_raw_042424.pdf"),width=7,height=7)
 print(p)
 dev.off()
-```
-
-#### ***[use later] ccle data ***
-```{r}
-df.tum.exp.1 <- df.tum.exp %>%
-  group_by(exp.tis) %>%
-  summarize_all(~median(ccle),.groups="drop") %>%
-  arrange(desc(ccle))
-df.tum.exp <- df.tum.exp %>%
-  mutate(exp.tis=factor(exp.tis,levels=df.tum.exp.1$exp.tis))
-
-p <- ggplot(df.tum.exp,aes(x=factor(exp.tis),y=ccle)) +
-  geom_violin(aes(fill=factor(exp.tis))) +
-  geom_jitter(width=0.15,height=0,size=1) +
-  scale_fill_manual(values=exp.ct.cols1)+
-  geom_point(data=df.tum.exp.1,aes(x=exp.tis,y=tum.exp.1),shape=95,size=10) +
-  geom_hline(yintercept=th) +
-  labs(title="Module gene expression in BC cell lines",x="celltype",y="Expression in BC cell lines") +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.position="none")
-
-set.seed(123)
-pdf(file.path(fig_dir1,"violin_ccle_expression_raw_042424.pdf"),width=7,height=7)
-print(p)
-dev.off()
-```
-
-
-```{r}
-df.tum.exp.2 <- df.tum.exp %>%
-  group_by(module) %>%
-  summarize_all(~median(ccle),.groups="drop") %>%
-  arrange(desc(ccle))
-df.tum.exp <- df.tum.exp %>% 
-  mutate(module=factor(module,levels=names(mods)))
-
-p <- ggplot(df.tum.exp,aes(x=module,y=ccle)) +
-  geom_violin(aes(fill=factor(module))) +
-  geom_jitter(width=0.15,height=0,size=1) +
-  scale_fill_manual(values=mod.uniq.cols)+
-  geom_point(data=df.tum.exp.2,aes(x=module,y=tum.exp.1),shape=95,size=10) +
-  geom_hline(yintercept=th) +
-  labs(title="Module gene expression in BC cell lines",x="",y="Expression in BC cell lines") +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.position="none")
-
-set.seed(123)
-pdf(file.path(fig_dir1,"violin_ccle_expression_module_042424.pdf"),width=4,height=7)
-print(p)
-dev.off()
-
-table(df.tum.exp$ccle > th , df.tum.exp$module)
 ```
 
 
@@ -584,6 +547,58 @@ boxplot(as.vector(tum.cors.ers) ~ mod.nms,
 abline(h=0)
 
 ```
+### ***[use later] ccle data ***
+```{r}
+df.tum.exp.1 <- df.tum.exp %>%
+  group_by(exp.tis) %>%
+  summarize_all(~median(ccle),.groups="drop") %>%
+  arrange(desc(ccle))
+df.tum.exp <- df.tum.exp %>%
+  mutate(exp.tis=factor(exp.tis,levels=df.tum.exp.1$exp.tis))
+
+p <- ggplot(df.tum.exp,aes(x=factor(exp.tis),y=ccle)) +
+  geom_violin(aes(fill=factor(exp.tis))) +
+  geom_jitter(width=0.15,height=0,size=1) +
+  scale_fill_manual(values=exp.ct.cols1)+
+  geom_point(data=df.tum.exp.1,aes(x=exp.tis,y=tum.exp.1),shape=95,size=10) +
+  geom_hline(yintercept=th) +
+  labs(title="Module gene expression in BC cell lines",x="celltype",y="Expression in BC cell lines") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.position="none")
+
+set.seed(123)
+pdf(file.path(fig_dir1,"violin_ccle_expression_raw_042424.pdf"),width=7,height=7)
+print(p)
+dev.off()
+```
+
+
+```{r}
+df.tum.exp.2 <- df.tum.exp %>%
+  group_by(module) %>%
+  summarize_all(~median(ccle),.groups="drop") %>%
+  arrange(desc(ccle))
+df.tum.exp <- df.tum.exp %>% 
+  mutate(module=factor(module,levels=names(mods)))
+
+p <- ggplot(df.tum.exp,aes(x=module,y=ccle)) +
+  geom_violin(aes(fill=factor(module))) +
+  geom_jitter(width=0.15,height=0,size=1) +
+  scale_fill_manual(values=mod.uniq.cols)+
+  geom_point(data=df.tum.exp.2,aes(x=module,y=tum.exp.1),shape=95,size=10) +
+  geom_hline(yintercept=th) +
+  labs(title="Module gene expression in BC cell lines",x="",y="Expression in BC cell lines") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.position="none")
+
+set.seed(123)
+pdf(file.path(fig_dir1,"violin_ccle_expression_module_042424.pdf"),width=4,height=7)
+print(p)
+dev.off()
+
+table(df.tum.exp$ccle > th , df.tum.exp$module)
+```
+
 
 ### [unused] Estimate activity scores accurately - linear regression model - per patient & per cell type (`pts`, `lst.mean.mods`, `cts1`)
 ```{r}
@@ -628,8 +643,7 @@ barplot(lst.mean.mods$ERS$Endothelial,col=as.numeric(factor(subtypes$subtype)))
 cmbd.mods <- cbind(do.call(cbind,lst.mean.mods)[subtypes$orig.ident,])
 
 mods <- factor(sub("\\..+","",colnames(cmbd.mods)),levels=c("ERS","TNFa/NFkB","IFN-I","APM/TC"))
-mod.cols <- c(brewer.pal(3,"Set1")[2],brewer.pal(3,"Accent")[c(1,3,2)])
-names(mod.cols) <- c("ERS","TNFa/NFkB","IFN-I","APM/TC")
+
 cors <- cor(cmbd.mods,method="pearson",use="pairwise.complete.obs")
 # heatmap3(cors,balanceCol=TRUE,scale="none",ColSideColors=mod.cols[mods],Colv=NA,Rowv=NA)
 heatmap3(cors,balanceCol=TRUE,scale="none",ColSideColors=mod.cols[mods],RowSideColors=mod.cols[mods])
@@ -656,17 +670,17 @@ nms.mods <- names(mods)[1:4]
 used.cts <- names(lst.mean.mods$ERS)
 nms.mods <- names(lst.mean.mods)
 for(nm in nms.mods){
-  mat <- lst.mean.mods[[nm]]
+  mean.pt.ct <- lst.mean.mods[[nm]]
 
   if(nm == "APM/TC"){
-    mat1 <- mat[,!names(mat) %in% c("Cancer","Endothelial","Fibroblast","Pericyte")]
+    mean.pt.ct1 <- mean.pt.ct[,!names(mean.pt.ct) %in% c("Cancer","Endothelial","Fibroblast","Pericyte")]
   }else{
-    mat1 <- mat
+    mean.pt.ct1 <- mean.pt.ct
   }
 
-  tmp1 <- data.frame(log_activity = log(unlist(mat1)), # activity = unlist(mat1), 
-                    pt = factor(rep(rownames(mat1),times=ncol(mat1))),
-                    ct = factor(rep(colnames(mat1),each=nrow(mat1))),levels=names(mat1)) %>%
+  tmp1 <- data.frame(log_activity = log(unlist(mean.pt.ct1)), # activity = unlist(mean.pt.ct1), 
+                    pt = factor(rep(rownames(mean.pt.ct1),times=ncol(mean.pt.ct1))),
+                    ct = factor(rep(colnames(mean.pt.ct1),each=nrow(mean.pt.ct1))),levels=names(mean.pt.ct1)) %>%
     # mutate(pt=factor(pt,levels=levels(pts))) %>%
     # mutate(ct=factor(ct,levels=uniq.cts1)) %>% # Und is removed from the cell types
     filter(!is.na(log_activity)) # filter(!is.na(activity)) 
@@ -681,9 +695,9 @@ for(nm in nms.mods){
 
   if(nm=="APM/TC"){
     names(coef.pt) <- sub("pt","",names(coef.pt))
-    tmp <- data.frame(log_activity = log(unlist(mat)), # activity = unlist(mat), 
-                  pt = factor(rep(rownames(mat),times=ncol(mat))),
-                  ct = factor(rep(colnames(mat),each=nrow(mat))),levels=names(mat)) %>%
+    tmp <- data.frame(log_activity = log(unlist(mean.pt.ct)), # activity = unlist(mean.pt.ct), 
+                  pt = factor(rep(rownames(mean.pt.ct),times=ncol(mean.pt.ct))),
+                  ct = factor(rep(colnames(mean.pt.ct),each=nrow(mean.pt.ct))),levels=names(mean.pt.ct)) %>%
            filter(!is.na(log_activity)) %>%
            mutate(log_activity_1 = log_activity + coef.pt[pt])
     lm2 <- lm(log_activity_1 ~ ct + 0, data=tmp)
@@ -692,7 +706,7 @@ for(nm in nms.mods){
     coef.ct <- c(coef[grep("^ct",names(coef))])
   }
   names(coef.ct) <- sub("ct","",names(coef.ct))
-  coef.ct <- coef.ct[names(mat)]
+  coef.ct <- coef.ct[names(mean.pt.ct)]
 
   this.ct <- rep(NA,length(used.cts))
   names(this.ct) <- used.cts
@@ -725,9 +739,9 @@ pts1 <- factor(df.pts$old,levels = df.pts$old)
 levels(pts1) <- df.pts$new
 
 if(0){
-  save(df.pts,df.ers,file=file.path(obj_dir1,"mod_activity_visvader_all_042424.rda"))
+  save(df.pts,df.ers,file=file.path(obj_dir1,"mod_activity_visvader_all_102324.rda"))
 }else{
-  load(file=file.path(obj_dir1,"mod_activity_visvader_all_042424.rda")) # df.pts, df.ers
+  load(file=file.path(obj_dir1,"mod_activity_visvader_all_102324.rda")) # df.pts, df.ers
 }
 ```
 
@@ -965,6 +979,10 @@ pdf(file.path(fig_dir1,"v3","mod_activity",paste0("plot_cor_ers_ers_042424.pdf")
 print(p)
 dev.off()
 
+```
+## save objects
+```{r}
+save(mods,mod.gns,df.tum.exp,file=file.path(obj_dir1,"df_gn_exp_tum_102324.rda"))
 ```
 
 
