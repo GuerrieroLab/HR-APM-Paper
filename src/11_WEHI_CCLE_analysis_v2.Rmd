@@ -1,0 +1,201 @@
+---
+title: "10_scRNAseq_data_analysis"
+#output: html_document
+date: "2023-09-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Initial setup
+### Set up paths
+```{r}
+obj_dir1 <- file.path(obj_dir,"10_visvader")
+fig_dir1 <- file.path(fig_dir,"10_visvader")
+```
+### Load libraries
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(heatmap3)
+  library(ggplot2)
+  library(ggrepel)
+  library(Seurat)
+  library(RColorBrewer)
+  # library(lme4)
+  # library(qvalue)
+  library(viridis)
+  library(ROCR)
+  library(GSVA)
+  # library(fgsea)
+})
+source(file.path(src_dir,"utils","h3.R"))
+```
+
+### Load data from WEHI analysis
+
+```{r}
+mod.gns
+df.tum.exp$tum.exp.1 =>> tum.exp.1, tum.exp
+df.pts
+df.ers => cors.ers,v.cors.ers
+wp?
+mat => all.syms,txn.syms => common.syms => mat1
+```
+
+## ***[used] CCLE data: looking at median expression in CCLE ***
+### - require `ccle.syms`,`ccle.m1.breast`,`comm.gns <= mods`,`lst.gns.by.exp.cts`,`nms1`,`lst.me`,`mods`
+
+```{r}
+fig_dir2 <- file.path(fig_dir,"9_ccle","v2")
+obj_dir2 <- file.path(obj_dir,"9_ccle")
+```
+
+```{r}
+x <- load(file.path(obj_dir2,"ccle_RNA-seq.rda")) ## ccle.syms, sub.ccle, ccle.m1.breast
+table(sub.ccle$PAM50.mRNA) # 19/54 are Luminal
+table(mod.gns %in% ccle.syms) ## all genes found in ccle
+
+ccle.exp <- log2(ccle.m1.breast[match(mod.gns,ccle.syms),]+1)
+rownames(ccle.exp) <- mod.gns
+med.ccle.exp <- apply(ccle.exp,1,function(x1)quantile(x1,1-(19/54))) # 64.8 percentile - representative expression in CCLE cell lines
+```
+
+```{r}
+identical(names(tum.exp.1),names(med.ccle.exp)) # TRUE, order of genes in WEHI and CCLE are identical
+
+# df.tum.exp1 <- df.tum.exp[1:7]
+df.tum.exp <- df.tum.exp[1:6] %>%
+  cbind(ccle=med.ccle.exp[df.tum.exp$genes])
+```
+
+## [Fig S6X - ROC] Define expressed genes in CCLE by setting threshold
+
+```{r}
+exp.pos <- df.tum.exp %>% filter(max.tis =="Cancer") %>% pull(ccle)
+exp.neg <- df.tum.exp %>% filter(max.tis %in% c("T","NK")) %>% pull(ccle)
+
+predictions <- c(exp.pos,exp.neg)
+labels <- rep(c(1,-1),c(length(exp.pos),length(exp.neg)))
+pred <- prediction(predictions,labels)
+perf <- performance(pred, "sens", "spec")
+
+df.roc <- data.frame(cut = perf@alpha.values[[1]], sens = perf@y.values[[1]], spec = perf@x.values[[1]])
+idx <- which.max(df.roc$sens + df.roc$spec)
+th <- df.roc$cut[idx]
+table(df.tum.exp$ccle > th)
+ttl <- paste0(
+  "Threshold: ",round(th,3),"\n",
+  "FPR:",round(1-df.roc$spec[idx],2),"\n",
+  "TPR:",round(df.roc$sens[idx],2))
+# th <- threshold1(predictions,labels)
+
+pdf(file.path(fig_dir2,"ROC_curve.pdf"),width=7,height=7)
+plot(1-df.roc$spec,
+     df.roc$sens,
+     xlab="False Positive Rate",
+     ylab="True Positive Rate",
+     lwd= 3,type="l",
+     main= "ROC curve - expression threhold in CCLE")
+points(1-perf@x.values[[1]][idx],perf@y.values[[1]][idx],pch=19,col=2)
+text(0.25,0.9,ttl,pos=1,col=2)
+dev.off()
+```
+
+```{r}
+df.tum.exp.2 <- df.tum.exp %>%
+  mutate(cl.smpls = (exp.tis %in% c("T","NK"))*2 + (exp.tis %in% "Cancer")*1 + 1) %>%
+  mutate(cl.smpls = factor(cl.smpls,labels=c("others","Cancer","T/NK"))) %>%
+  arrange(order(cl.smpls))
+
+cl.cols <- c(others="grey20",Cancer=2,`T/NK`=4)
+
+dc <- densCols(df.tum.exp.2$tum.exp.1,df.tum.exp.2$ccle,nbin=128,
+               colramp =colorRampPalette(blues9[-(1:4)]))
+
+pe <- cor(df.tum.exp.2$tum.exp.1,df.tum.exp.2$ccle,method="pe")
+pdf(file.path(fig_dir2,"plot_exp_in_ccle_and_cancer_cells.pdf"),width=7,height=7)
+par(mar=c(5,5,3,3))
+plot(df.tum.exp.2$tum.exp.1,df.tum.exp.2$ccle,pch=20,cex=1,col=dc,
+     xlab="In cancer cells, WEHI (log2)",
+     ylab="In cell lines, CCLE (log2)",
+     main="Expression of four module genes\nin cancer cells and cell lines")
+abline(h=th,lty=2)
+abline(h=0,v=0)
+text(1.5,2,paste0("PCC=",round(pe,2)))
+dev.off()
+
+```
+
+#### [Fig S6B] violin plot - gene expression by cell type
+```{r}
+df.tum.exp.1 <- df.tum.exp %>%
+  group_by(exp.tis) %>%
+  summarize_all(~median(ccle),.groups="drop") %>%
+  arrange(desc(ccle))
+df.tum.exp <- df.tum.exp %>%
+  mutate(exp.tis=factor(exp.tis,levels=df.tum.exp.1$exp.tis))
+
+p <- ggplot(df.tum.exp,aes(x=factor(exp.tis),y=ccle)) +
+  geom_violin(aes(fill=factor(exp.tis))) +
+  geom_jitter(width=0.15,height=0,size=1) +
+  scale_fill_manual(values=exp.ct.cols1)+
+  geom_point(data=df.tum.exp.1,aes(x=exp.tis,y=tum.exp.1),shape=95,size=10) +
+  geom_hline(yintercept=th) +
+  labs(title="Module gene expression in BC cell lines",x="celltype",y="Expression in BC cell lines") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.position="none")
+
+set.seed(123)
+pdf(file.path(fig_dir2,"violin_ccle_expression_raw_042424.pdf"),width=7,height=7)
+print(p)
+dev.off()
+```
+
+#### [Fig 3B] violin plot - gene expression by modules
+```{r}
+df.tum.exp.2 <- df.tum.exp %>%
+  group_by(module) %>%
+  summarize_all(~median(ccle),.groups="drop") %>%
+  arrange(desc(ccle))
+df.tum.exp.3 <- df.tum.exp %>%
+  group_by(module) %>%
+  summarize(n.pos = sum(ccle > th),n = n()) %>%
+  mutate(txt = paste0(n.pos,"/",n)) %>%
+  mutate(y=9)
+
+df.tum.exp <- df.tum.exp %>% 
+  mutate(module=factor(module,levels=names(mods)))
+
+p <- ggplot(df.tum.exp,aes(x=module,y=ccle)) +
+  geom_violin(aes(fill=factor(module))) +
+  geom_jitter(width=0.15,height=0,size=1) +
+  scale_fill_manual(values=mod.uniq.cols)+
+  geom_point(data=df.tum.exp.2,aes(x=module,y=tum.exp.1),shape=95,size=10) +
+  geom_text(data=df.tum.exp.3,aes(x=module,y=y,label=txt),color=2, size=6) +
+  geom_hline(yintercept=th) +
+  labs(title="Module gene expression in BC cell lines",x="",y="Expression in BC cell lines (log2)") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 12),
+        axis.text.y = element_text(size = 12),
+        legend.position="none")
+
+set.seed(123)
+pdf(file.path(fig_dir2,"violin_ccle_expression_module_042424.pdf"),width=4,height=7)
+print(p)
+dev.off()
+```
+
+### save data 
+```{r}
+df.ccle.ct1 <- df.tum.exp %>% 
+  filter(ccle > th) %>%
+  rename(med.ccle = ccle,sym=genes) # 152
+ccle.exp1 <- ccle.exp[df.ccle.ct1$sym,]
+rc1.sub <- rc[df.ccle.ct1$sym,]
+
+save(df.ccle.ct1,ccle.exp1,rc1.sub,file=file.path(obj_dir1,"ccle_expressed_genes_042424.rda"))
+```
+
+
