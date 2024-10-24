@@ -1,6 +1,6 @@
 ---
 title: "6. Looking into the correlation in different cancer types"
-output: html_notebook
+#output: html_notebook
 ---
 
 ## Initial setup
