@@ -191,7 +191,6 @@ df.gs <- as.data.frame(t(gsva.gs)) %>%
   tibble::rownames_to_column("bot") %>%
   arrange(desc(ERS)) %>%
   mutate(new=paste0("df",seq(nrow(df.gs))))
-
 ```
 
 #### [discontinued] tri.heatmap() [not used for now]
