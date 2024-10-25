@@ -300,61 +300,6 @@ clin <- readRDS(file.path(obj_dir,"clinical","metadata.rds"))
 ```
 
 
-## [Fig S7C] linear regression
-```{r}
-coef.pts.2 <- coef.pts.1 %>% 
-  tibble::rownames_to_column("new") %>%
-  mutate(idx=as.numeric(sub("cy","",new))) %>%
-  arrange(idx) %>%
-  mutate(new = factor(new,levels=new)) %>%
-  dplyr::select(-idx) %>%
-  dplyr::select(new,ERS) %>%
-  dplyr::rename(sn_ERS = ERS)
-
-df.gs.2 <- as.data.frame(df.gs) %>% 
-  filter(new %in% coef.pts.2$new) %>%
-  dplyr::select(new,ERS) %>%
-  dplyr::rename(bulk_ERS = ERS)
-
-ct.freq <- as.data.frame(t(nstat)) %>%
-  tibble::rownames_to_column("new") %>%
-  mutate(new = factor(new,levels=new)) %>% 
-  dplyr::select(new,Tumor)
-
-df.ers <- inner_join(coef.pts.2,df.gs.2,by="new") %>%
-  inner_join(ct.freq,by="new") %>%
-  mutate(sim_bulk = sn_ERS * Tumor)
-
-lm0 <- lm(bulk_ERS ~ sn_ERS + Tumor, data=df.ers)
-lm1 <- lm(bulk_ERS ~ sn_ERS, data=df.ers)
-lm2 <- lm(bulk_ERS ~ Tumor, data=df.ers)
-
-r.sq <- c(sn_freq=summary(lm0)$r.squared,
-  sn=summary(lm1)$r.squared,
-  freq=summary(lm2)$r.squared)
-
-if(1){
-  pdf(file.path(fig_dir,"v2","mod_activity",paste0("barplot_rsq_ERS_h_042624.pdf")),
-      width=7,height=3)
-  barplot(rev(r.sq),las=2,xlim=c(0,1),col=brewer.pal(3,"Set1"),
-          main="R-squared of linear regression model",
-          xlab="Model",ylab="R-squared",horiz=T)
-  dev.off()
-}
-
-if(1){
-  pdf(file.path(fig_dir,"v2","mod_activity",paste0("plot_ERS_activity_comparison_042624.pdf")),
-      width=7,height=7)
-  par(mar=c(5,5,3,3))
-  cor.1 <- cor(df.ers$sn_ERS,df.ers$bulk_ERS,use="pairwise.complete.obs",method="pearson")
-  plot(df.ers$sn_ERS,df.ers$bulk_ERS,
-       xlab="Mean ERS activity in tumor cells (sn)",ylab="Bulk ERS activity",
-       main=paste0("ERS activity in two platforms", " (PCC=",round(cor.1,2),")"),
-       pch=20)
-  abline(lm1,col="red")
-  dev.off()
-}
-```
 ## pathway analysis
 
 ```{r}

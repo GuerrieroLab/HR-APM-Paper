@@ -264,42 +264,113 @@ seurat_harmony@meta.data$celltype_broad_v3 <-factor(all.cts.2,levels=uniq.all.3)
 
 ```
 
-## Compute correlation between cell type frequency and module expression (bulk)
+### [Fig S7A] celltype on UMAP
 ```{r}
-df.gs <- readRDS(file.path(obj_dir,"11_dfbcc_txn","df_pcs_mod_activity_v3.rds"))
-bots <- sub("BOT","",df.gs %>% arrange(desc(ERS)) %>% pull(bot))
-bots.used <- intersect(bots, unique(seurat_harmony$sample))
+cts <- seurat_harmony$celltype_broad_v3
+cts[cts=="Other"] <- NA
+cts <- factor(cts)
+seurat_all_v1 <- subset(seurat_harmony,cells=names(cts[!is.na(cts)]))
+
+png(file.path(fig_dir1, "umap_wp_celltype_wo_other.png"), width = 700,height = 700)
+p <- DimPlot(seurat_all_v1, group.by = "celltype_broad_v3", label = FALSE, reduction = "umap", raster=FALSE, pt.size=0.1) +
+  theme(legend.text = element_text(size = 24),
+        legend.key.size=unit(5,"mm")) +
+  labs(title = NULL)
+print(p)
+dev.off()
+```
+
+### [Fig S7B] DotPlot
+```{r}
+seurat_all_v1@meta.data$celltype_broad_v3_rev <- factor(seurat_all_v1@meta.data$celltype_broad_v3,levels=rev(levels(cts)))
+
+pdf(file.path(fig_dir1,"dotplot_wp_celltype.pdf"),width=12,height=6)
+DotPlot(seurat_all_v1, features = unique(mks), group.by = "celltype_broad_v3_rev") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  xlab("") + ylab("")
+dev.off()
+
+```
+
+### [Fig S7H] Compute correlation between cell type frequency and module expression (bulk)
+```{r}
+df.gs <- readRDS(file.path(obj_dir,"11_dfbcc_txn","df_pcs_mod_activity_v3.rds")) %>%
+  mutate(bot = sub("BOT","",bot)) %>%
+  arrange(desc(ERS)) %>%
+  filter(bot %in% unique(seurat_harmony$sample))
+bots.used <- df.gs$bot
+new.ids <- df.gs$new
 
 seurat_harmony$sample <- factor(seurat_harmony$sample, levels=bots.used)
 
 ##
+load(file.path(obj_dir,"15_dfbcc_snseq","exp.ct.cols2.rda"))
 set.seed(123)
-ct.cols <- c(sample(colorRampPalette(brewer.pal(11,"Spectral"))(12)),"grey80")
-tab <- table(seurat_harmony$celltype_broad_v3,seurat_harmony$sample)[,bots.used]
+tab <- table(seurat_all_v1$celltype_broad_v3,seurat_all_v1$sample)[-13,bots.used]
+rownames(tab)[6] <- "Mono_Mac"
 names(ct.cols) <- rownames(tab)
 mat.freq <- array(tab,dim(tab))
 nfreq <- apply(mat.freq,2,function(x)x/sum(x))
 
 rownames(nfreq) <- rownames(tab)
-colnames(nfreq) <- colnames(tab)  
+colnames(nfreq) <- new.ids # colnames(tab)  
+
+
+pdf(file.path(fig_dir1,"cts_barplot_dfbcc.pdf"),width=7,height=7)
 
 par(mar=c(5,5,4,10))
-barplot(nfreq[13:1,],col=ct.cols[13:1],las=2,
-        main="Cell type frequency (snRNA-seq), sorted by ERS activity")
-legend(par()$usr[2],par()$usr[4],names(ct.cols),fill=ct.cols,xpd=T)
+barplot(nfreq[12:1,],col=rev(exp.ct.cols2[1:12]),las=2,
+        beside=F,border=FALSE,
+        xlab="",ylab="Frequency",
+        main="Cell type frequency (DF/BCC, snRNA-seq)",cex.names=1)
+par(xpd=T)
+legend(par()$usr[2],par()$usr[4],
+       names(exp.ct.cols2[1:12]),
+       fill=exp.ct.cols2[1:12])
+par(xpd=F)
 
-df.gs.1 <- df.gs[match(bots.used,sub("BOT","",df.gs$bot)),]
-
-ers <- df.gs.1$ERS
-names(ers) <- sub("BOT","",df.gs.1$bot)
-
-cors <- apply(nfreq,1,function(x)cor(x,df.gs.1[2:5]))
-rownames(cors) <- c("ERS","TNFa/NFkB","IFN-I","APM/TC")
+dev.off()
 ```
 
 ```{r}
-o <- order(cors["ERS",])
-barplot(cors["ERS",o],horiz=T,col=ct.cols[o],las=1)
+saveRDS(nfreq,file.path(obj_dir1,"nstat_dfbcc_sn.rds"))
+```
+
+### [Fig S7I] Correlation between cell type abundance
+```{r}
+ers <- df.gs$ERS
+names(ers) <- df.gs$new
+
+nms <- names(mods)
+
+cors <- apply(nfreq[1:12,],1,function(x)cor(x,df.gs.1[2:5]))
+rownames(cors) <- nms
+
+cor.pvals <- apply(nfreq[1:12,],1,function(x){
+  sapply(df.gs.1[2:5],function(y){
+    tmp <- cor.test(x,y)$p.value
+  })
+})
+# heatmap3(cors,balanceColor=T,scale="none",Colv=NA,Rowv=NA,margins=c(10,5))
+
+is.sig <- cor.pvals < 0.05
+
+cor1 <- cor(t(nfreq[1:12,]))
+heatmap3(cor1,balanceColor=T,scale="none")
+```
+
+### [Fig S7X] Correlation between cell type abundance
+```{r}
+nms <- names(mods)
+for(nm in nms){
+  o <- order(cors[nm,])
+  this.cors <- cors[nm,o]
+  is.sig.1 <- is.sig[nm,o]
+  names(this.cors) <- paste0(names(this.cors),c("","*")[is.sig.1+1])
+  barplot(this.cors,horiz=T,col=ct.cols[o],las=1,
+          main=paste0(nm," (snRNA-seq)"))
+}
+
 o <- order(cors["TNFa/NFkB",])
 barplot(cors["TNFa/NFkB",o],horiz=T,col=ct.cols[o],las=1)
 o <- order(cors["IFN-I",])
@@ -308,20 +379,11 @@ o <- order(cors["APM/TC",])
 barplot(cors["APM/TC",o],horiz=T,col=ct.cols[o],las=1)
 ```
 
-### [Fig S7A] celltype on UMAP
-```{r}
-png(file.path(fig_dir1, "umap_wp_celltype.png"), width = 700,height = 700)
-p <- DimPlot(seurat_harmony, group.by = "celltype_fine", label = FALSE, reduction = "umap", raster=FALSE, pt.size=0.1) +
-  theme(legend.text = element_text(size = 24),
-        legend.key.size=unit(5,"mm")) +
-  labs(title = NULL)
-print(p)
-dev.off()
-```
+
 ## Save Results
 ```{r}
 # saveRDS(seurat_all_v1, file=file.path(obj_dir, "seurat_all_v1.rds"))
-saveRDS(seurat_harmony, file=file.path(obj_dir1, "seurat_haromny_v2.rds")) 
+saveRDS(seurat_harmony, file=file.path(obj_dir1, "seurat_harmony_v2.rds")) 
 saveRDS(nfreq, file=file.path(obj_dir, "snseq_ctfreq.rds"))
 ```
 

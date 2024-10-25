@@ -1,0 +1,640 @@
+---
+title: "10_scRNAseq_data_analysis"
+output: html_document
+date: "2023-09-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Summary
+`10_visvader_analysis.Rmd` compute the activity of ERS signature, APM/TC EXT/INT signature in different cell types.
+Then do the following analysis.
+
+- ERS signature anticorrelates with EXT/INT signature within tumor cells [confirmed]
+- INT-Cancer and INT-Macrophage is correlated 
+- MHC-I or II also correlated/anti-correlated? [can be confirmed]
+  - Are they more expressed in CD68+ or CD163+ cells?
+- Frequency is correlated with ERS? [Yes, a little]
+  - (But frequency can be less accurate; due to stress caused by cell isolation)
+- INT is lower in tumor: why? which genes are not expressed in Cancer?
+  - They are probably dependent on the samples to look at (which ones?)
+
+- Or is it because of the heterogeneity of the tumor cells?
+- Macropahge is not correlating with INT-Cancer this time...
+- How CyCIF makes sense here?
+
+- Violin plot per genes [TBD]
+
+#
+- redo with the newer signature
+## Initial setup
+001 runs the course of analysis on all cells from 20 primary HR+ breast cancers.
+- load samples
+- generate tables for metadata
+- normalize data
+- pca, umap, tsne
+- clustering (FindClusters)
+- identify top n-th biomarkers
+- percent markers panCK, HLA-ABC, HRs, SPP1
+
+### Set up paths
+```{r}
+obj_dir1 <- file.path(obj_dir,"15_dfbcc_snseq")
+fig_dir1 <- file.path(fig_dir,"15_dfbcc_snseq","v3")
+```
+
+### Load libraries
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(heatmap3)
+  library(ggplot2)
+  library(ggrepel)
+  library(Seurat)
+  # library(lme4)
+  # library(qvalue)
+  library(viridis)
+  library(RColorBrewer)
+  # library(ROCR)
+  library(GSVA)
+  library(fgsea)
+})
+source(file.path(src_dir,"utils","h3.R"))
+```
+
+### Load data
+#### scRNA-seq data
+```{r}
+wp <- readRDS(file=file.path(obj_dir1,"seurat_harmony_v2.rds"))
+
+df.gs <- readRDS(file.path(obj_dir,"11_dfbcc_txn","df_pcs_mod_activity_v3.rds"))
+```
+
+
+
+## Load Module genes
+```{r}
+mods <-readRDS(file.path(obj_dir,"1-4_prep","module_genes_final_122923.rds"))
+
+common.tested.gns <- readRDS(file.path(obj_dir,"1-4_prep","common_tested_gns.rds"))
+```
+
+```{r}
+## caution, SparseMatrix -> matrix conversion is huge, and uses memory (37G)
+mat0 <- GetAssayData(wp)
+all.gns <- rownames(mat0) # 24374 genes
+genes_data <- rownames(GetAssayData(object = wp, slot = "data"))
+
+mods <- lapply(mods,function(gns){
+  gns[gns %in% all.gns] 
+}) ## 250 genes - CXCL5, HLA_H, KIR3DL3, CSF2 - are not used
+
+## update side colors for heatmap
+sig.lcols <- readRDS(file=file.path(obj_dir1,"../1-4_prep","sigs_sidecols.rds"))
+unlist(mods)[which(!unlist(mods) %in% all.gns)] # HLA-A
+ss <- sig.lcols[,"subclass"]
+ss[ss=="white"] <- "steelblue"
+sig.lcols[,"subclass"] <- ss
+sig.lcols <- sig.lcols[,-2]
+colnames(sig.lcols) <- c("hallmark","module")
+
+mod.uniq.cols <- c("steelblue",brewer.pal(3,"Accent")[c(1,3,2)])#f3756c","#7caf42","#16bcc2","#a780ba")
+names(mod.uniq.cols) <- names(mods)
+```
+
+## Compute module expression in individual cells with GSVA - `gsva_scores`
+```{r}
+# 15397 genes
+used.all.gns <- intersect(all.gns,common.tested.gns) # 13423 genes
+
+mat <- mat0[used.all.gns,]
+
+if(0){
+  system.time({
+    ssgsea.par <- ssgseaParam(expr = mat, geneSets = mods, minSize = 15, maxSize = 500)
+    gsva_scores <- gsva(ssgsea.par)
+    gsva_scores <- t(gsva_scores)
+  })
+  saveRDS(gsva_scores,file.path(obj_dir1,"scores_dfci_trimmed_mat_v4.rds"))
+}else{
+  gsva_scores <- readRDS(file.path(obj_dir1,"scores_dfci_trimmed_mat_v4.rds"))
+}
+
+wp@meta.data$ERS <- gsva_scores[,"ERS"]
+wp@meta.data$`TNFa/NFkB` <- gsva_scores[,"TNFa/NFkB"]
+wp@meta.data$`IFN-I` <- gsva_scores[,"IFN-I"]
+wp@meta.data$`APM/TC` <- gsva_scores[,"APM/TC"]
+```
+
+### [Fig S7B] Color UMAP with module activities
+```{r}
+for(mod in names(mods)){
+  c1 <- quantile(wp@meta.data[[mod]],0.01)
+  c2 <- quantile(wp@meta.data[[mod]],0.99)
+  ttl <- sub("[-/]","",mod)
+  p <- FeaturePlot(wp, reduction = "umap", features = mod,raster=FALSE,
+              min.cutoff=c1,max.cutoff=c2,pt.size=0.1) + 
+    scale_color_viridis(option = "D", direction = 1) +
+    NoLegend() +
+    labs(title=mod)
+  png(file.path(fig_dir1,"umap",paste0("umap_wp_",ttl,".png")),width=700,height=700)
+  print(p)
+  dev.off()
+}
+
+```
+
+### [used] Estimate activity scores accurately - linear regression model - per patient & per cell type (`pts`, `lst.mean.mods`, `cts1`)
+```{r}
+mod.gns <- unlist(mods)
+gn.exp <- mat[mod.gns,] %>%
+  as.matrix() %>% 
+  t() %>%
+  as.data.frame()# %>%
+
+## rename Epithelial -> Cancer
+names(wp@meta.data)
+
+cts <- wp$celltype_broad_v3
+wp$celltype_2 <- cts
+
+uniq.bot <- df.gs$bot
+names(uniq.bot) <- paste0("df",seq(uniq.bot))
+
+# plot(match(paste0("BOT",levels(wp$sample)),uniq.bot))
+uniq.bot.1 <- uniq.bot[uniq.bot %in% paste0("BOT",unique(wp$sample))]
+new.id.1 <- names(uniq.bot.1)
+names(new.id.1) <- uniq.bot.1
+
+gn.exp.mods <- gn.exp %>%
+  mutate(bot=factor(paste0("BOT",wp$sample),uniq.bot.1)) %>%
+  mutate(smpl=new.id.1[as.character(bot)]) %>%
+  mutate(smpl=factor(smpl,levels=new.id.1)) %>%
+  mutate(celltype=wp$celltype_2) %>%
+  mutate(subtype=wp$subtype)
+
+names(gn.exp.mods)<- c(mod.gns,"bot","smpl","celltype","subtype")
+
+## identical(rownames(gn.exp.mods),rownames(scores)) ### TRUE
+
+lst.mean.gns <- lapply(gn.exp.mods[mod.gns],function(sc){
+  dfs <- as.data.frame(tapply(sc,list(gn.exp.mods$smpl,gn.exp.mods$celltype),mean,na.rm=T))[1:12]
+})
+
+lst.mean.mods <- apply(gsva_scores,2,function(sc){
+  dfs <- as.data.frame(tapply(sc,list(gn.exp.mods$smpl,gn.exp.mods$celltype),mean,na.rm=T))[1:12]
+},simplify=FALSE)
+```
+
+### [Fig S7D] comparison of expression pattern of module genes
+```{r}
+if(1){
+  df.all <- do.call(cbind,lapply(lst.mean.gns,unlist))
+  cor.all.gns <- cor(df.all,use="pairwise.complete.obs")
+  
+  h <- heatmap3(cor.all.gns,balanceCol=TRUE,scale="none",
+           ColSideColors=mod.cols[rownames(cor.all.gns)],
+           RowSideColors=mod.cols[rownames(cor.all.gns)])
+  h.ri <- h$rowInd
+  
+  cut10 <- cutree(h$hcr,10)
+  uniq.cut10 <- unique(cut10[h$rowInd])
+  cut10 <- as.numeric(factor(cut10,levels=uniq.cut10))
+  # identical(rownames(rc),names(cut10))
+  set.seed(12)
+  rc <- cbind(sig.lcols[rownames(cor.all.gns),],celltype=sample(brewer.pal(10,"Spectral"))[cut10])
+
+  
+  ##
+  pdf(file.path(fig_dir1,"v2","mod_activity","heatmap_250_mod_gene_exp-ptrn_042624.pdf"),width=7,height=7)
+  h <- heatmap3(cor.all.gns,balanceCol=TRUE,scale="none",
+           ColSideColors=rc,RowSideColors=rc)
+  dev.off()
+}  
+```
+
+
+```{r}
+mods.v <- rep(names(mods),sapply(mods,length))
+names(mods.v) <- unlist(mods)
+# identical(names(mods.v),names(cut10))
+mod.cl <- table(module=mods.v,cluster=cut10)
+```
+
+
+#### [Fig S7D - cont'd] Compute median level - require `mods`, `sig.lcols`, `mat0`, `cts1`
+```{r}
+uniq.gns <- unlist(mods)
+rc <- sig.lcols[uniq.gns,]
+mat1 <- mat0[uniq.gns,]
+
+cts1 <- wp$celltype_2
+mean.mat <- t(apply(mat1,1,function(x){
+  tmp <- tapply(x,cts1,mean,na.rm=T)
+  tmp <- tmp/max(tmp,na.rm=T)
+  return(tmp)
+}))
+
+wm <- apply(mean.mat,1,which.max)
+
+mean.mat.1 <- t(apply(mat1,1,function(x){
+  tmp <- tapply(x,cts1,mean,na.rm=T)
+  # tmp <- tmp/max(tmp,na.rm=T)
+  return(tmp)
+}))
+
+used.bot <- sub("BOT","",df.gs$bot)
+names(used.bot) <- df.gs$new
+smpls <- factor(wp$sample,levels=used.bot[used.bot %in% wp$sample])
+mean.mat.s <- t(sapply(uniq.gns,function(gn){
+  x <- mat1[gn,]
+  # this.ct <- levels(cts1)[wm[gn]]
+  # tmp <- tapply(x,list(smpls,cts1),mean,na.rm=T)#[,this.ct]
+  tmp <- tapply(x,smpls,mean,na.rm=T)
+  tmp <- tmp/max(tmp,na.rm=T)
+  return(tmp)
+}))
+
+rownames(mean.mat.s) <- uniq.gns
+# mean.mat.s.1 <- t(apply(mat1,1,function(x){
+#   tmp <- tapply(x,cts1,mean,na.rm=T)
+#   # tmp <- tmp/max(tmp,na.rm=T)
+#   return(tmp)
+# }))
+
+```
+
+#### [Fig S7D mid/right] heatmap relative expression among cell types for each gene
+
+```{r}
+cols <- viridis(100)#rev(colorRampPalette(brewer.pal(11,"YlGnBu"))(50))
+if(1){
+  pdf(file.path(fig_dir1,"v2","mod_activity",
+                paste0("heatmap_ct_expression_all_042624.pdf")),width=7,height=7)
+  xh <- h3(mean.mat[h.ri,1:12],scale="none",
+       RowSideColors=rc[h.ri,],col=cols,Rowv=NA,Colv=NA)
+  dev.off()
+
+  pdf(file.path(fig_dir1,"v2","mod_activity",
+                paste0("heatmap_smpl_expression_all_042624.pdf")),width=7,height=7)
+  xh <- h3(mean.mat.s[h.ri,],scale="none",
+       RowSideColors=rc[h.ri,],col=cols,Rowv=NA,Colv=NA)
+  dev.off()
+}
+
+```
+
+### [Fig S7D far-right] representing cell-type per cluster - require `cut10`,`rc`
+
+```{r}
+tum.exp <- mean.mat[,"Cancer"]
+tum.exp.1 <- mean.mat.1[,"Cancer"] ## already log scale
+
+max.tis <- colnames(mean.mat)[apply(mean.mat,1,which.max)]
+names(max.tis) <- rownames(mean.mat)
+
+df.tum.exp <- data.frame(genes=names(tum.exp),
+                         tum.exp=tum.exp,
+                         tum.exp.1=tum.exp.1,
+                         celltype=factor(cut10),
+                         exp.tis=max.tis,
+                         module=mods.v)
+
+n.clusts <- 10
+xh <- h3(mean.mat[h.ri,],scale="none",
+     RowSideColors=rc,col=cols,Colv=NA,
+     distfunR=dist)
+hc <- xh$hcr
+mem <- cutree(hc,k=n.clusts)
+mem <- mem[xh$rowInd]
+mem <- factor(mem,levels=rev(unique(mem)))
+
+lst.gns.by.exp.cts <- tapply(names(mem),mem,identity)
+names(lst.gns.by.exp.cts) <- seq(lst.gns.by.exp.cts)
+
+lst.gns.by.cor <- tapply(df.tum.exp$genes,df.tum.exp$celltype,identity)
+
+th1 <- 0.7 # th to consider if each celltype expresses`each gene` 
+th2 <- 0.3 # th to consider if each celltype expresses `this cluster of genes`
+
+ct.exp <- lapply(lst.gns.by.cor,function(x){
+  tmp <- mean.mat[x,]
+  oc <- order(colMeans(tmp),decreasing=T)
+  tmp <- tmp[,oc]
+  nm <- colnames(tmp)
+  n <- length(x)
+  is.exp <- factor(unlist(apply(tmp,1,function(y){
+    names(which(y > th1))
+  })),levels=nm)
+  is.exp <- table(is.exp)
+  
+  this.cts <- names(which(sort(is.exp,decreasing=T)/n > th2))
+  # this.cts <- sort(is.exp,decreasing=T)/n
+  return(this.cts)
+})
+
+print(ct.exp)
+```
+
+### [Fig S7F] Compute the similarity of the expression pattern of each gene
+```{r}
+df.each <- do.call(cbind,lapply(lst.mean.mods,as.matrix))
+colnames(df.each) <- paste(rep(names(lst.mean.mods),sapply(lst.mean.mods,ncol)),colnames(df.each),sep="_")
+cor.each <- cor(df.each,use="pairwise.complete.obs",method="pearson")
+
+mod.cols <- rep(mod.uniq.cols,sapply(lst.mean.mods,ncol))
+
+if(1){
+  pdf(file.path(fig_dir1,"v2","mod_activity","heatmap_mod_activity_042624.pdf"),width=7,height=7)
+  h3(cor.each,balanceCol=TRUE,scale="none",
+     ColSideColors=cbind(module=mod.cols),
+     RowSideColors=cbind(module=mod.cols),
+     margins=c(10,10))
+  dev.off()
+}
+
+```
+
+### Cell-type composition - require `lst.gns.by.exp.cts`,`mean.mat`
+
+```{r}
+exp.ct1 <- rep(names(lst.gns.by.exp.cts),sapply(lst.gns.by.exp.cts,length))
+names(exp.ct1) <- unlist(lst.gns.by.exp.cts)
+
+df.mods <- data.frame(sym=unlist(mods),
+                      module=rep(names(mods),sapply(mods,length))) %>%
+  mutate(module=factor(module,levels=names(mods))) %>%
+  mutate(exp.ct=exp.ct1[sym]) %>%
+  mutate(exp.ct=factor(exp.ct,levels=unique(uniq.exp.cts))) %>%
+  filter(sym != "HLA-H")
+```
+```{r}
+exp.ct.mods <- as.matrix(table(df.mods$exp.ct,df.mods$module))
+n.exp.ct.mods <- exp.ct.mods/colSums(exp.ct.mods)[col(exp.ct.mods)]
+```
+
+## Module expression per cell type and per sample - `coef.cts.1` and `coef.pts.1`
+```{r}
+coef.cts <- coef.pts <- list()
+nms.mods <- names(mods)
+
+used.cts <- names(lst.mean.mods$ERS)
+
+for(nm in nms.mods){
+  mat <- lst.mean.mods[[nm]]
+
+  if(nm == "APM/TC"){
+    mat1 <- mat[,!names(mat) %in% c("Cancer","Endothelial","Fibroblast","Pericyte")]
+  }else{
+    mat1 <- mat
+  }
+
+  tmp1 <- data.frame(log_activity = log(unlist(mat1)), # activity = unlist(mat1), 
+                    pt = factor(rep(rownames(mat1),times=ncol(mat1))),
+                    ct = factor(rep(colnames(mat1),each=nrow(mat1))),levels=names(mat1)) %>%
+    filter(!is.na(log_activity)) # filter(!is.na(activity)) 
+  lm1 <- lm(log_activity ~ pt + ct + 0, data=tmp1)
+  coef <- summary(lm1)$coefficients[,1]
+  
+  coef.pt <- coef[grep("^pt",names(coef))]
+  sorted.pts <- sub("pt","",names(sort(coef.pt)))
+  coef.pts[[nm]] <- coef.pt
+  
+  coef.ct <- c(ctAdipo=0,coef[grep("^ct",names(coef))])
+
+  if(nm=="APM/TC"){
+    names(coef.pt) <- sub("pt","",names(coef.pt))
+    tmp <- data.frame(log_activity = log(unlist(mat)), # activity = unlist(mat), 
+                  pt = factor(rep(rownames(mat),times=ncol(mat))),
+                  ct = factor(rep(colnames(mat),each=nrow(mat))),levels=names(mat)) %>%
+           filter(!is.na(log_activity)) %>%
+           mutate(log_activity_1 = log_activity + coef.pt[pt])
+    lm2 <- lm(log_activity_1 ~ ct + 0, data=tmp)
+    coef <- summary(lm2)$coefficients[,1]
+    coef <- coef - coef["ctB"]
+    coef.ct <- c(coef[grep("^ct",names(coef))])
+
+  }
+  names(coef.ct) <- sub("ct","",names(coef.ct))
+  coef.ct <- coef.ct[names(mat)]
+
+  this.ct <- rep(NA,length(used.cts))
+  names(this.ct) <- used.cts
+  this.ct[names(coef.ct)] <- coef.ct
+  
+  coef.cts[[nm]] <- this.ct
+}
+
+coef.cts.1 <- as.data.frame(exp(do.call(cbind,coef.cts)))
+coef.pts.1 <- as.data.frame(exp(do.call(cbind,coef.pts)))
+
+## reorder coef.pts.1
+rownames(coef.pts.1) <- sub("^pt","",rownames(coef.pts.1))
+o <- order(as.numeric(sub("df","",rownames(coef.pts.1))))
+df.pts <- coef.pts.1[o,] %>% tibble::rownames_to_column("new")
+  
+save(df.pts,file=file.path(obj_dir1,"mod_activity_dfci_all_042624.rda"))
+```
+
+### [Fig S7E] Heatmap - compute avg score per `ct` and `pt` - sanity check - require `lst.mean.mods`, `cts1`
+```{r}
+cts <- used.cts
+cts1 <- factor(cts,levels=cts)
+
+sorted.pts <- df.pts$new
+
+for(nm in nms.mods){
+  mat <- lst.mean.mods[[nm]]
+  old.pts <- rownames(mat)
+
+  # rownames(mat) <- df.pts$new[match(rownames(mat),df.pts$old)] 
+  cols <- viridis(100)
+  pdf(file.path(fig_dir1,paste0("avgexp_",sub("/","",nm),"_raw_042624.pdf")),
+      width=7,height=7)
+  h3(mat,balanceColor=FALSE,Colv=NA,Rowv=NA,
+     scale="none",na.color="grey",col=viridis(100),cexRow=.8)
+
+  mtext(paste0("Activity of ",nm," module\n(No scaling)"),
+    side=3,line=0,cex=2)
+  dev.off()
+}
+```
+
+#### [Fig S7G] heatmap - patient and cell type level activities
+```{r}
+# cell type level
+pdf(file.path(fig_dir1,"coef_cts_raw_042624.pdf"),width=7,height=7)
+h3(coef.cts.1[rev(seq(nrow(coef.cts.1))),],balanceColor=FALSE,Colv=NA,Rowv=NA,scale="column",
+   na.color="grey",col=cols,
+   margins=c(10,5))
+dev.off()
+
+## patient-level
+mat.pts <- as.matrix(df.pts[-1])
+rownames(mat.pts) <- as.character(df.pts$new)
+
+pdf(file.path(fig_dir1,"coef_pts_raw_042624.pdf"),width=7,height=7)
+h3(mat.pts,balanceColor=FALSE,Colv=NA,Rowv=NA,scale="column",na.color="grey",
+   col=cols,margins=c(10,5),cexRow = .8)
+dev.off()
+```
+
+#### [Fig S7K] correlation among all subtypes or within HR+
+```{r}
+cors.all <- cor(coef.pts.1,method="pearson",use="pairwise.complete.obs")
+pdf(file.path(fig_dir1,"correlation_all_pts_042624.pdf"),width=7,height=7)
+h3(cors.all,balanceCol=TRUE,scale="none",Colv=NA,Rowv=NA,na.col="grey",
+   ColSideColors=mod.uniq.cols,RowSideColors=mod.uniq.cols,
+   main="PCC between module activity (per patient), all subtypes")
+dev.off()
+
+write.csv(round(cors.all,3),file.path(fig_dir1,"correlation_all_pts_042624.csv"))
+```
+
+
+## [Fig S7J] correlation between activity and cell types
+
+```{r}
+nfreq <- readRDS(file.path(obj_dir1,"nstat_dfbcc_sn.rds"))
+cors.all <- cor(t(nfreq[,df.pts$new]),df.pts[names(mods)],use="pairwise.complete.obs",method="pearson")
+
+for(nm in nms){
+  nm1 <- sub("[-/]","",nm)
+  cors.all.mod <- sort(cors.all[,nm],decreasing=F)
+  pdf(file.path(fig_dir1,paste0("barplot_cor_all_",nm1,"_102524.pdf")),width=7,height=7)
+  par(mar=c(5,10,4,1))
+  barplot(cors.all.mod,las=1,horiz=TRUE,col=exp.ct.cols2[names(cors.all.mod)],
+          main=paste0("PCC between ",nm," activity and cell type frequency"),
+          xlab="PCC",ylab="")
+  dev.off()
+}
+
+```
+
+## [Fig S7C] linear regression
+```{r}
+coef.pts.2 <- df.pts
+names(coef.pts.2)[2:5] <- paste0("sn_",names(df.pts)[2:5])
+
+df.gs.2 <- df.gs.1
+names(df.gs.2)[2:5] <- paste0("bulk_",names(df.gs.2)[2:5])
+
+df.ers <- inner_join(coef.pts.2,df.gs.2,by="new")
+
+lm1 <- lm(bulk_ERS ~ sn_ERS, data=df.ers)
+
+pdf(file.path(fig_dir1,paste0("plot_ERS_activity_comparison_042624.pdf")),
+    width=7,height=7)
+par(mar=c(5,5,3,3))
+cor.1 <- cor(df.ers$sn_ERS,df.ers$bulk_ERS,use="pairwise.complete.obs",method="pearson")
+plot(df.ers$sn_ERS,df.ers$bulk_ERS,
+     xlab="Mean ERS activity in tumor cells (sn)",ylab="Bulk ERS activity",
+     main=paste0("ERS activity in two platforms", " (PCC=",round(cor.1,2),")"),
+     pch=20)
+abline(lm1,col="red")
+dev.off()
+```
+
+
+## [used] pathway analysis
+
+```{r}
+cons.gns <- readRDS("/Users/kenichishimada/Dropbox (HMS)/_projects_/B06 03 HR-APM/manuscript/Rdata/9_ccle/conserved_gns.rds")
+imm12 <- intersect(cons.gns$APMTC1,mods$`APM/TC`)
+imm23 <- intersect(cons.gns$APMTC3,mods$`APM/TC`)
+cons.gns <- c(cons.gns,list(imm12=imm12,imm23=imm23))
+
+# mods, mat0, wp$celltype_2, wp$sample
+msigdb <- readRDS("/Users/kenichishimada/Dropbox (HMS)/_projects_/B06 03 HR-APM/manuscript/Rdata/5_pathway_analysis/msigdb.rds")
+
+msigdb.1 <- c(msigdb,mods)
+prefix <- sub("_.+","",names(msigdb))
+table(prefix)
+
+all.syms <- unique(unlist(msigdb.1))
+txn.syms <- rownames(mat0)
+common.syms <- intersect(all.syms,txn.syms) # 16207
+
+is.tum <- wp$celltype_2 == "Cancer"
+tum.smpls <- wp$sample[is.tum]
+mat1 <- mat0[common.syms,is.tum]
+
+m.tum <-  apply(mat1,1,function(x){
+  tapply(x,tum.smpls,mean)
+})
+
+uniq.cts <- levels(wp$celltype_2)
+
+m.cts <- list()
+m.cts$Cancer <- m.tum
+for(ct in uniq.cts[-1]){
+  cat(ct,"..\n")
+  is.ct <- wp$celltype_2 == ct
+  ct.smpls <- wp$sample[is.ct]
+  
+  mat2 <- mat0[common.syms,is.ct]
+  
+  m.ct <-  apply(mat2,1,function(x){
+    tapply(x,ct.smpls,mean,na.rm=T)
+  })
+  m.cts[[ct]] <- m.ct
+}
+
+##
+# sapply(m.cts,function(m)sum(is.na(m)))
+
+for(i in 2:4){
+  this.gs <- mods[[i]]
+  # this.gs <- colnames(m.cts[[1]])
+  exp.gs <- sapply(m.cts,function(m){
+    colMeans(m[,this.gs],na.rm=T)
+  })
+  
+  ratio.tum <- apply(exp.gs,1,function(e){
+    e[1]/max(e,na.rm=T)
+  })
+  if(i==2){
+    add=F
+  }else{
+    add=T
+  }
+  plot.ecdf(ratio.tum,add=add,col=i) ## 36%
+}
+## ratio.tum should be greater than 1.
+
+this.gs <- colnames(m.cts[[1]])
+exp.gs <- sapply(m.cts,function(m){
+  colMeans(m[,this.gs],na.rm=T)
+})
+
+ratio.tum <- apply(exp.gs,1,function(e){
+  e[1]/max(e,na.rm=T)
+})
+
+plot.ecdf(ratio.tum)
+plot(ratio.tum,v.cors.tum,pch='.') ## atually there are some differences
+abline(h=-0.6,col=2)
+
+# should go ratio.tum > 0.1 to be a little more stringet
+tum.gns <- names(which(ratio.tum==1))
+
+is.exp.by.tum <- ratio.tum > .1
+
+saveRDS(is.exp.by.tum,file=file.path(obj_dir1,"is_exp_by_tum_dfci.rds"))
+```
+
+```{r}
+dfci.tum.gns <- names(which(is.exp.by.tum))
+v.gns <- readRDS("/Users/kenichishimada/Dropbox (HMS)/_projects_/B06 03 HR-APM/manuscript/Rdata/10_visvader/is_exp_by_tum.rds")
+tum.gns <- intersect(names(which(is.exp.by.tum)),names(which(v.gns)))
+saveRDS(tum.gns,file=file.path(obj_dir1,"tum_gns_dfci_vis.rds"))
+```
+
+```{r}
+load(file=file.path(obj_dir1,"fgsea_dfci_sn_042624.rda")) # cors.ers,cors.tum,cors.cy,fg.ers,fg.tu,fg.cy
+cors.ers <- cors.ers[tum.gns]
+cors.tum <- cors.tum[tum.gns]
+cors.cy <- cors.cy[tum.gns]
+```
+
