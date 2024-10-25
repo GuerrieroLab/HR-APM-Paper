@@ -1,0 +1,329 @@
+---
+title: "prep for single-nucleus RNA-seq analysis of DFBCC samples"
+---
+
+## Initial setup
+### Load libraries
+```{r}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(tidyverse)
+  # library(RCurl)
+  # library(cowplot)
+  # library(harmony)
+  # library(scCustomize)
+  # library(org.Hs.eg.db)
+  library(RColorBrewer)
+})
+```
+
+### Load input data
+```{r}
+obj_dir1 <- file.path(obj_dir,"15_dfbcc_snseq")
+fig_dir1 <- file.path(fig_dir,"15_dfbcc_snseq","v3")
+
+x1 <- load(file.path(obj_dir1,"seurat_harmony_totalv1_4.RData")) # seurat_harmony
+x2 <- load(file.path(obj_dir1,"seurat_harmony_harmony_CD45v2_4.RData")) # seurat_CD45
+# x3 <- load(file.path(obj_dir1,"seurat_harmony_sct_lymph_cleanv1_4.RData")) # seurat_lymph_clean
+x3 <- load(file=file.path(obj_dir1,"seurat_harmony_sct_lymph_clean_KS.RData")) # seurat_lymph_clean
+
+x4 <- load(file.path(obj_dir1,"seurat_harmony_sct_myeloidv1_4.RData")) # seurat_myeloid
+# x5 <- load(file.path(obj_dir1,"seurat_sct_sct_macv2_4.RData")) # seurat_mac
+x5 <- load(file=file.path(obj_dir1, "seurat_sct_mac_KS.RData")) # seurat_mac
+```
+
+### Load Biomarkers
+```{r}
+all_gns <- rownames(GetAssayData(seurat_harmony))
+
+epi_gns <- c("KRT7", "KRT8", "KRT18", "KRT19", "KRT5", "KRT6B", "KRT14", "KRT17")
+fib_gns <- c("COL1A1", "ACTA2", "PDPN")
+peri_gns <- c("RGS5")
+endo_gns <- c("PECAM1")
+adipo_gns <- c("CIDEA")
+mast_gns <- c("MS4A2", "KIT")
+dc_gns <- c("FCER1A", "CD1A", "IRF4", "IRF8", "IL3RA", "LAMP3")
+mac_gns <- c("CD68", "CD163", "CD14", "LYZ", "FCGR3A")
+t_gns <- c("CD3D", "CD2", "TRAC", "TRBC1", "TRDC", "CD4", "FOXP3", "CD8A", "GZMB", "GZMK")
+nk_gns <- c("KLRD1", "KLRC1")
+b_gns <- c("MS4A1", "IGHM", "JCHAIN")
+pl_gns <- c("IGHA1", "IGHA2", "IGHG1", "IGHG3", "IGHG4")
+
+lst.mks <- list(Epi=epi_gns, Fib=fib_gns, Peri=peri_gns, Endo=endo_gns, Adipo=adipo_gns,
+                Mac=mac_gns, DC=dc_gns, Mast=mast_gns, T=t_gns, NK=nk_gns, B=b_gns, Pl=pl_gns)
+
+mks <- unlist(lst.mks)
+names(mks) <- c()
+table(mks %in% all_gns)  # Check if all markers are in the dataset
+```
+
+## Update clusters
+```{r}
+names(seurat_harmony@meta.data)
+table(seurat_harmony$seurat_clusters) # Cluster numbers
+table(seurat_harmony$celltype_broad)  # Cell types - broad
+table(seurat_harmony$celltype_fine)   # Cell types - fine
+```
+### update cell type names
+```{r}
+```
+
+
+### [not used] Optional plots for cell types and clusters
+```{r}
+png(file.path(fig_dir1,"umap_wp_clust.png"),width=1000,height=1000)
+DimPlot(seurat_harmony, group.by = "celltype_broad", label=TRUE, reduction = "umap", raster=FALSE) + 
+  ggplot2::labs(title = "whole population") + NoLegend()
+dev.off()
+
+```
+
+### Rename Seurat clusters
+```{r}
+tab1 <- table(seurat_harmony$seurat_clusters, seurat_harmony$celltype_fine)
+idx <- apply(tab1, 2, function(x) names(which(x > 0)))
+
+new.idx <- c(paste0("epi_", idx$epithelial),
+             paste0("adi_", idx$adipocyte),
+             paste0("fib_", idx$fibroblast),
+             paste0("peri_", idx$pericyte),
+             paste0("endo_", idx$endothelial),
+             paste0("mye_", idx$myeloid),
+             paste0("lym_", idx$lymphocyte))
+
+names(new.idx) <- sub("^.+_", "", new.idx)
+new.idx.sorted <- new.idx[order(as.numeric(names(new.idx)))]  # New labels
+seurat_harmony@meta.data[["seurat_clusters_v1"]] <- factor(new.idx.sorted[seurat_harmony$seurat_clusters], levels=rev(new.idx))
+```
+
+## Harmony -> CD45 comparison
+```{r}
+tab1 <- table(seurat_harmony$celltype_broad, seurat_harmony$celltype_fine)
+x1 <- apply(tab1, 1, function(x) names(which(x > 0)))
+
+tab2 <- table(seurat_CD45$celltype_broad, seurat_CD45$celltype_fine)
+x2 <- apply(tab2, 1, function(x) names(which(x > 0)))
+
+# Optional: check separation of clusters between harmony and CD45
+if (FALSE) {
+  table(seurat_harmony$seurat_clusters[names(seurat_CD45$celltype_broad)])
+  table(seurat_harmony$celltype_broad[names(seurat_CD45$celltype_broad)])
+}
+```
+
+## CD45 -> Myeloid/Lymphocyte comparison
+```{r}
+tab1 <- table(seurat_CD45$celltype_broad, seurat_CD45$celltype_fine)
+x1 <- apply(tab1, 1, function(x) names(which(x > 0)))
+
+tab2 <- table(seurat_myeloid$celltype_broad, seurat_myeloid$celltype_fine)
+x2 <- apply(tab2, 1, function(x) names(which(x > 0)))
+
+tab3 <- table(seurat_lymph_clean$celltype_broad, seurat_lymph_clean$celltype_fine)
+x3 <- apply(tab3, 1, function(x) names(which(x > 0)))
+
+# Check for overlap between myeloid and lymphoid cells
+intersect(names(seurat_myeloid$celltype_broad), names(seurat_lymph_clean$celltype_broad))  # Zero overlap expected
+```
+
+## CD45 to Myeloid consistency
+```{r}
+if (FALSE) {
+  table(seurat_CD45$celltype_broad[names(seurat_myeloid$celltype_broad)])  # 6474 myeloid
+  table(seurat_CD45$celltype_broad[!names(seurat_CD45$celltype_broad) %in% names(seurat_myeloid$celltype_broad)])
+}
+```
+
+## Myeloid to macrophages analysis
+```{r}
+tab1 <- table(seurat_myeloid$celltype_broad, seurat_myeloid$celltype_fine)
+apply(tab1, 1, function(x) names(which(x > 0)))
+
+tab2 <- table(seurat_mac$celltype_broad, seurat_mac$celltype_fine)
+apply(tab2, 1, function(x) names(which(x > 0)))
+
+if (FALSE) {
+  table(seurat_myeloid$celltype_broad[names(seurat_mac$celltype_broad)])  # all mono_mac
+}
+```
+
+## Macrophage -> myeloid merging
+```{r}
+if (FALSE) {
+  table(mac.cts, mye.cts[names(mac.cts)])  # They are all mye_mono_mac
+  mye.cts[names(mac.cts)] <- mac.cts  # Replace myeloid monocytic macrophages
+  table(mye.cts)
+}
+```
+
+## Lymphoid consistency
+```{r}
+tab <- table(seurat_CD45$celltype_broad, seurat_CD45$celltype_fine)
+x1 <- apply(tab, 1, function(x) names(which(x > 0)))
+
+tab2 <- table(seurat_lymph_clean$celltype_broad, seurat_lymph_clean$celltype_fine)
+x2 <- apply(tab2, 1, function(x) names(which(x > 0)))
+
+# Optionally plot lymphoid distribution
+if (FALSE) {
+  DimPlot(seurat_lymph_clean, group.by = "celltype_broad", label=TRUE, reduction = "umap", raster=FALSE) +
+    ggplot2::labs(title = "Lymphocytes")
+}
+```
+
+## Rename cell types for consistency
+```{r}
+mye.cts <- seurat_myeloid@meta.data$celltype_broad
+names(mye.cts) <- rownames(seurat_myeloid@meta.data)
+
+mac.cts <- seurat_mac@meta.data$celltype_broad_v2
+names(mac.cts) <- rownames(seurat_mac@meta.data)
+
+lym.cts <- seurat_lymph_clean@meta.data$celltype_broad
+names(lym.cts) <- rownames(seurat_lymph_clean@meta.data)
+
+mye.cts.1 <- mye.cts
+uniq.mye <- sub("(mye_|mac_)","",names(table(mye.cts)))
+uniq.mye[grep("[cp]DC[0-9]?",uniq.mye)] <- "DC"
+uniq.mye[grep("TAM$",uniq.mye)] <- "Mac"
+uniq.mye[uniq.mye=="DC-like"] <- "Mac"
+uniq.mye[uniq.mye=="mast_cell"] <- "Mast"
+names(uniq.mye) <- names(table(mye.cts))
+
+mye.cts.1[] <- uniq.mye[mye.cts]
+table(mye.cts.1)
+
+## lymphoid cell types
+lym.cts.1 <- lym.cts
+names(uniq.lym) <- uniq.lym <- names(table(lym.cts))
+# uniq.lym[!uniq.lym %in% c("B_cell","NK_cell","Regulatory_T","Plasma_cell")] <- "T"
+uniq.lym[] <- c("B","T_CD4","T_CD8","NK","Plasma","T_reg")
+
+lym.cts.1[] <- uniq.lym[lym.cts]
+table(lym.cts.1)
+
+```
+
+## Merging CD45 cell types
+```{r}
+mye.cts.1[names(mye.cts.1) %in% names(mac.cts)] <- as.character(mac.cts)
+cd45.cts <- seurat_CD45$celltype_broad
+cd45.cts[names(cd45.cts) %in% names(mye.cts)] <- mye.cts.1
+cd45.cts[names(cd45.cts) %in% names(lym.cts)] <- lym.cts.1
+
+cd45.cts[cd45.cts == "lymphocyte"] <- "NA"
+cd45.cts[cd45.cts == "myeloid"] <- "NA"
+cd45.cts[cd45.cts == "t_cell"] <- "NA"
+cd45.cts[cd45.cts == "epithelial"] <- "imm_epi"
+cd45.cts[cd45.cts == "fibroblast"] <- "imm_fib"
+
+table(cd45.cts)
+
+seurat_CD45@meta.data$celltype_broad_v2 <- cd45.cts
+seurat_CD45_v1 <- subset(seurat_CD45, cells=names(which(cd45.cts != "NA")))
+
+if(0){
+  DimPlot(seurat_CD45_v1, group.by = "celltype_broad_v2", label=TRUE, reduction = "umap", raster=FALSE) +
+    ggplot2::labs(title = "CD45_celltype_updated")
+}
+```
+
+### update cell types in seurat_harmony
+```{r}
+all.cts <- seurat_harmony$celltype_fine
+all.cts.2 <- all.cts.1 <- all.cts
+all.cts[names(cd45.cts)] <- cd45.cts
+names(uniq.all) <- uniq.all <- names(table(all.cts))
+
+uniq.all[c("adipocyte","endothelial","epithelial","fibroblast","pericyte")] <- c("Adipo","Endo","Cancer","Fibro","Peri")
+uniq.all.sorted <- c("Cancer","Fibro","imm_epi","imm_fib","Peri","Endo","Adipo",
+                "Mac_DN","Mac_CD68","Mac_CD163","Mac_DP","DC","Mast",
+                "T_CD4","T_CD8","T_reg","NK","B","Plasma","NA")
+o <- match(uniq.all.sorted,uniq.all)
+uniq.all <- uniq.all[o]
+
+uniq.all.2 <- uniq.all
+uniq.all.2[grep("Mac_",uniq.all)] <- "Mac"
+uniq.all.2[grep("T_",uniq.all)] <- "T"
+uniq.all.2[c("NA","imm_epi","imm_fib")] <- "Other"
+
+# all.cts.1[] <- uniq.all[all.cts]
+all.cts.2[] <- uniq.all.2[all.cts]
+all.cts.2[is.na(all.cts.2)] <- "Other"
+
+uniq.all.3 <- unique(uniq.all.2)
+uniq.all.3 <- c(uniq.all.3[-3],uniq.all.3[3])
+
+seurat_harmony@meta.data$celltype_broad_v2 <-factor(all.cts.1,levels=uniq.all[-which(uniq.all %in% c("NA","imm_epi","imm_fib"))])
+seurat_harmony@meta.data$celltype_broad_v3 <-factor(all.cts.2,levels=uniq.all.3)
+
+# seurat_all_v1 <- subset(seurat_harmony,cells=names(all.cts.1[!is.na(all.cts.1) & !all.cts.1 %in% c("NA","imm_epi","imm_fib")]))
+# 
+# levs <- levels(seurat_all_v1$celltype_broad_v2)
+# seurat_all_v1@meta.data$celltype_broad_v2_rev <-factor(seurat_all_v1$celltype_broad_v2,levels=rev(levs))
+
+```
+
+## Compute correlation between cell type frequency and module expression (bulk)
+```{r}
+df.gs <- readRDS(file.path(obj_dir,"11_dfbcc_txn","df_pcs_mod_activity_v3.rds"))
+bots <- sub("BOT","",df.gs %>% arrange(desc(ERS)) %>% pull(bot))
+bots.used <- intersect(bots, unique(seurat_harmony$sample))
+
+seurat_harmony$sample <- factor(seurat_harmony$sample, levels=bots.used)
+
+##
+set.seed(123)
+ct.cols <- c(sample(colorRampPalette(brewer.pal(11,"Spectral"))(12)),"grey80")
+tab <- table(seurat_harmony$celltype_broad_v3,seurat_harmony$sample)[,bots.used]
+names(ct.cols) <- rownames(tab)
+mat.freq <- array(tab,dim(tab))
+nfreq <- apply(mat.freq,2,function(x)x/sum(x))
+
+rownames(nfreq) <- rownames(tab)
+colnames(nfreq) <- colnames(tab)  
+
+par(mar=c(5,5,4,10))
+barplot(nfreq[13:1,],col=ct.cols[13:1],las=2,
+        main="Cell type frequency (snRNA-seq), sorted by ERS activity")
+legend(par()$usr[2],par()$usr[4],names(ct.cols),fill=ct.cols,xpd=T)
+
+df.gs.1 <- df.gs[match(bots.used,sub("BOT","",df.gs$bot)),]
+
+ers <- df.gs.1$ERS
+names(ers) <- sub("BOT","",df.gs.1$bot)
+
+cors <- apply(nfreq,1,function(x)cor(x,df.gs.1[2:5]))
+rownames(cors) <- c("ERS","TNFa/NFkB","IFN-I","APM/TC")
+```
+
+```{r}
+o <- order(cors["ERS",])
+barplot(cors["ERS",o],horiz=T,col=ct.cols[o],las=1)
+o <- order(cors["TNFa/NFkB",])
+barplot(cors["TNFa/NFkB",o],horiz=T,col=ct.cols[o],las=1)
+o <- order(cors["IFN-I",])
+barplot(cors["IFN-I",o],horiz=T,col=ct.cols[o],las=1)
+o <- order(cors["APM/TC",])
+barplot(cors["APM/TC",o],horiz=T,col=ct.cols[o],las=1)
+```
+
+### [Fig S7A] celltype on UMAP
+```{r}
+png(file.path(fig_dir1, "umap_wp_celltype.png"), width = 700,height = 700)
+p <- DimPlot(seurat_harmony, group.by = "celltype_fine", label = FALSE, reduction = "umap", raster=FALSE, pt.size=0.1) +
+  theme(legend.text = element_text(size = 24),
+        legend.key.size=unit(5,"mm")) +
+  labs(title = NULL)
+print(p)
+dev.off()
+```
+## Save Results
+```{r}
+# saveRDS(seurat_all_v1, file=file.path(obj_dir, "seurat_all_v1.rds"))
+saveRDS(seurat_harmony, file=file.path(obj_dir1, "seurat_haromny_v2.rds")) 
+saveRDS(nfreq, file=file.path(obj_dir, "snseq_ctfreq.rds"))
+```
+
+
+
