@@ -282,7 +282,7 @@ dev.off()
 
 ##### [Fig S4C] BC subtypes
 ```{r}
-seurat_lymph_clean1@meta.data$subtype <- factor(seurat_lymph_clean1@meta.data$subtype,levels=c("HR","HER2","TNBC"),labels=c("HR+","HER2+,"TNBC"))
+seurat_lymph_clean1@meta.data$subtype <- factor(seurat_lymph_clean1@meta.data$subtype,levels=c("HR","HER2","TNBC"),labels=c("HR+","HER2+","TNBC"))
 
 png(file.path(fig_dir1, "umap_lymphoid_subtype_v3.png"), width = 700,height = 700)
 p <- DimPlot(seurat_lymph_clean1, group.by = "subtype", label = FALSE, reduction = "umap", raster=FALSE, pt.size=0.1) +
