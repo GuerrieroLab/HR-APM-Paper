@@ -1,0 +1,1620 @@
+---
+title: "ERS-APM/TC analysis part I (cell type frequency analysis)"
+author: "Kenichi Shimada"
+date: '2023-07-30'
+# output: 
+#   html_notebook: 
+#     toc: yes
+---
+
+# ERS-APM/TC CyCIF analysis: part I
+
+## Initial setup ---------------------------
+
+### Re-install CycifAnalyzeR after updating the package
+```{r reinstall_CyCIF_ library,eval=F}
+ suppressPackageStartupMessages({
+  devtools::install_github("kenichi-shimada/CycifAnalyzeR",force=TRUE)
+  # devtools::load_all("/Users/kenichishimada/Dropbox (HMS)/_projects_/B00 CyCIF/CycifAnalyzeR")
+})
+```
+
+### Load packages
+
+```{r load_packages,message=F,warning=F}
+suppressPackageStartupMessages({
+  library(MASS)
+  library(RColorBrewer)
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(ggrepel)
+  library(heatmap3)
+  library(sp)
+  library(compositions)
+  library(viridisLite)
+  library(sf)
+  library(lme4)
+  library(data.table)
+  library(CycifAnalyzeR)
+})
+```
+
+### Load `cs1`
+```{r define cell types} 
+cs1 <- readRDS(file=file.path(cycif_obj_dir,"cs1_cts_102624.rds"))
+```
+
+### Module activity `df.gs`
+```{r}
+# cor(m,m) # column-wise comparison
+df.gs <- pData(cs1) %>% 
+  select(3:6) %>%
+  as.matrix()
+rownames(df.gs) <- names(cs1)
+```
+
+## Make key components in spatial analysis: `lst.dists`, `lst.frnn`
+
+### `lst.dists`: define tumor border and compute distance from tumor border for each cell
+
+```{r}
+## instead of just cancer cell intrinsic, we should do cell-unbiased analysis
+r_um <- 20 # um (radius of the microenvironment)
+r <- round(r_um/0.65,2) # convert from um to pixel
+k <- 20
+
+dth <- distAdjacentCells(cs1)
+
+nms <- names(cs1)
+
+this.cts <- cell_types(cs1)
+used.cts <- levels(this.cts$cell_types)[1:12] # remove Imm_other, all_other, outOfROI
+  
+
+if(0){
+  cts.all <- table(this.cts)[,used.cts] 
+  
+  ns <- rowSums(cts.all)
+  n <- round(quantile(ns,0.1)) # only looking at 10 percentile of the nCells.
+  
+  for(nm in nms){
+    cat(nm,"..\n")
+    x1 <- cs1[[nm]]
+    obj <- defineTumorStroma(x1, n.cores = 7, dth=dth, concavity = 0.8, plot = FALSE)
+    saveRDS(obj,file.path(cycif_obj_dir,"distance",paste0("defTS_",nm,".rds")))
+  }
+}else{
+  lst.dists  <- list()
+  for(nm in nms){
+    # x1 <- cs1[[nm]]
+    # obj <- defineTumorStroma(x1, n.cores = 7, dth=dth, concavity = 0.8, plot = FALSE)
+    # saveRDS(obj,file.path(cycif_obj_dir,"distance",paste0("defTS_",nm,".rds")))
+    lst.dists[[nm]] <- readRDS(file.path(cycif_obj_dir,"distance",paste0("defTS_",nm,".rds")))
+  }
+}
+```
+
+### `lst.frnn` - computeCN()
+```{r}
+n.sampling <- 10000
+if(0){
+  for(nm in nms){
+    cat(nm,"\t")
+    x <- cs1[[nm]]
+    obj <- computeCN(x,type="frnn",
+                     r_um=20,
+                     used.cts = used.cts,
+                     n.sampling=n.sampling,
+                     seed=123)
+    saveRDS(obj,file.path(cycif_obj_dir,"cn_frnn",paste0("cn_frnn_",nm,".rds")))
+  }
+}else{
+  lst.frnn <- list()
+  for(nm in nms){
+    lst.frnn[[nm]] <- readRDS(file.path(cycif_obj_dir,"cn_frnn",paste0("cn_frnn_",nm,".rds")))
+  }
+}
+```
+
+## TS ratio
+
+### [Fig 5B] tumor vs stroma cells, in tumor core vs stroma
+```{r}
+freq.stat <- sds <- list()
+
+for(nm in nms){
+  x1 <- cs1[[nm]]
+  this.cts <- cell_types(x1)$cell_type
+
+  this.cts <- as.character(this.cts)
+  this.cts[is.na(this.cts)] <- "NA"
+
+  wr <- this.cts != "outOfROI"
+  
+  xy <- xys(x1)
+  xy$Y_centroid <- max(xy$Y_centroid) - xy$Y_centroid
+  xy.sf <- st_as_sf(xy[wr,],coords=c("X_centroid","Y_centroid"))
+  
+  obj <- lst.dists[[nm]]
+  
+  this.cts1 <- this.cts[wr]
+  this.d <- obj$dist
+  this.seg <- this.d$seg
+  this.points <- this.d$points
+  this.dist <- this.d$dist
+
+  ##
+  is.cancer <- this.cts1 == "Cancer"
+  tum.d <- this.dist[is.cancer]
+  
+  if(0){
+    ## distance of cancer cells
+    xx <- hist(tum.d,breaks=1000,main="distance of cancer cells from border",plot=F)
+    ymax <- max(xx$counts)
+  
+    fn <- paste0("dist_tum_",nm,".png")
+    pdf(file.path(cycif_fig_dir,"slide_dist","dist_tumor",fn),width=7,height=7)
+    xx <- hist(tum.d,breaks=1000,main="distance of cancer cells from border",ylim=c(0,ymax * .1))
+    abline(v=c(0,304,1000),col=2)
+    dev.off()
+  
+    hist(tum.pos.d,breaks=1000)
+  }
+  
+  tum.pos.d <- tum.d[tum.d > 0 & tum.d < 1000 & !is.na(tum.d)]
+  sds[[nm]] <- sqrt(sum(tum.pos.d^2)/length(tum.pos.d)) # mean distance between tumor region and tumor buds
+  
+  tab <- table(cell_types = this.cts1 == "Cancer", 
+               within.bed = this.d$dist < 0)[c("TRUE","FALSE"),c("TRUE","FALSE")]
+  freq.stat[[nm]] <- as.vector(tab)
+}
+
+freq.ts <- apply(do.call(cbind,freq.stat),2,function(x)x/sum(x))
+```
+
+```{r}
+if(0){
+  save(freq.ts,sds,file=file.path(cycif_obj_dir,"freq_ts.rda"))
+}else{
+  load(file=file.path(cycif_obj_dir,"freq_ts.rda"))
+}
+```
+
+```{r}
+## Fig. 5B
+
+cols <- brewer.pal(6,"Paired")[c(6,5,2,1)]
+
+pdf(file.path(cycif_fig_dir,"ts_axis","freq_cancer_buds.pdf"),width=7,height=7)
+par(mar=c(5,4,4,10))
+barplot(freq.ts,las=2,main="# of cancer and non-cancer cells inside and outside\nthe cancer region",
+        col=cols,cex.names=.7)
+legend(par()$usr[2],par()$usr[4],c("cancer in core","cancer in stroma","non-cancer in core","non-cancer in stroma"),
+       fill=cols,bty="n",xpd=NA)
+dev.off()
+
+
+##
+```
+
+### [Fig 5C] ERS activity vs ratio of non-cancer cells within tumor region
+```{r}
+ratio.st.tum <- freq.ts[3,]/freq.ts[1,]
+
+cor.p <- cor(df.gs[,"ERS"],ratio.st.tum)
+lm1 <- lm(ratio.st.tum ~ df.gs[,"ERS"])
+
+pdf(file.path(cycif_fig_dir,"ts_axis","ERS_vs_tumor_buds.pdf"),width=7,height=7)
+par(mar=c(5,5,3,3))
+plot(df.gs[,"ERS"],ratio.st.tum,
+     xlab="ERS activity",pch=20,
+     ylab="ratio of # non-cancer cells/# turor cells within tumor region",
+     main=paste0("`ERS activity' vs `non-cancer cells within tumor region'\n","(Pearson=",round(cor.p,2),")"))
+abline(lm1,col=2,lwd=2)
+dev.off()
+```
+
+### [Fig 5D] TS ratio for all cell types
+```{r}
+cts <- cell_types(cs1) %>% filter(is.na(cell_types) | cell_types != "outOfROI")
+
+dists <- unlist(sapply(lst.dists,function(ld)ld$dist$dist))
+
+dfs <- cbind(cts,dist=dists) %>%
+  mutate(sample = factor(sample,levels=nms)) %>%
+  mutate(cell_types = factor(cell_types,levels=uniq.cts[1:13])) %>%
+  filter(!is.na(cell_types))
+
+d.th <- 0
+rts.all <- dfs %>% 
+  group_by(sample) %>%
+  filter(cell_types %in% uniq.cts[-1]) %>%
+  summarize(npos=sum(dist > d.th,na.rm=T),
+            nneg=sum(dist < d.th,na.rm=T),
+            ntot=n()) %>%
+  mutate(ratio_all = npos/nneg) %>%
+  select(ratio_all) %>%
+  unlist()
+names(rts.all) <- nms
+rts <- list()
+
+for(ct in uniq.cts[1:13]){
+  # take the ratio of positive dist to negative in dfs, group by sample
+  rts[[ct]] <- dfs %>% 
+    filter(cell_types == ct) %>%
+    group_by(sample) %>%
+    summarize(npos=sum(dist > d.th,na.rm=T),
+              nneg=sum(dist < d.th,na.rm=T),
+              ntot=n()) %>%
+    mutate(ratio = npos/nneg) %>%
+    mutate(rratio = ratio/rts.all[as.character(sample)]) %>%
+    mutate(log_ratio = log2(rratio)) %>%
+    group_by() %>%
+    mutate(cell_type=ct)
+}
+
+log.rts <- do.call(rbind,rts) %>%
+  select(sample,cell_type,log_ratio) %>%
+  filter(!is.na(log_ratio)) %>%
+  mutate(cell_type = factor(cell_type,levels=uniq.cts[2:13]))
+range(log.rts$log_ratio[abs(log.rts$log_ratio) < Inf],na.rm=T)
+log.rts$log_ratio[log.rts$log_ratio==Inf] <- 6
+log.rts$log_ratio[log.rts$log_ratio==-Inf] <- -6
+
+sorted.cts <- sort(tapply(log.rts$log_ratio,log.rts$cell_type,mean,na.rm=T))
+log.rts <- log.rts %>%
+  mutate(cell_type=factor(cell_type,levels=names(sorted.cts))) %>%
+  filter(!is.na(cell_type), cell_type != "all_other")
+
+rts.p <- list()
+for(uc in uniq.cts[2:13]){
+  rts.p[[uc]] <- t.test(log.rts %>% filter(cell_type == uc) %>% pull(log_ratio),alternative="two.sided")$p.value
+}
+rts.p <- unlist(rts.p)
+
+mid.log.rts <- log.rts %>%
+  group_by(cell_type) %>%
+  summarize(log_ratio=mean(log_ratio,na.rm=T)) %>%
+  mutate(pval = rts.p[as.character(cell_type)])
+
+cols <- brewer.pal(11,"RdBu")[c(2,11)]
+p <- ggplot(log.rts,aes(cell_type,log_ratio)) +
+  geom_violin(aes(fill=cell_type)) +
+  scale_fill_manual(values=ct.cols) +
+  geom_jitter(width=.2,size=.5) +
+  geom_hline(yintercept = 0) +
+  geom_point(data=mid.log.rts %>% filter(pval > 0.05), aes(x=cell_type,y=log_ratio),size=12,shape=95,color="grey50") +
+  geom_point(data=mid.log.rts %>% filter(pval < 0.05 & log_ratio < 0),aes(x=cell_type,y=log_ratio),size=12,shape=95,color=cols[2]) + 
+  geom_point(data=mid.log.rts %>% filter(pval < 0.05 & log_ratio > 0),aes(x=cell_type,y=log_ratio),size=12,shape=95,color=cols[1]) +   
+  ggtitle("log TS-ratio of all cell types") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        legend.position="none") +
+  xlab("") +
+  ylab("log2 TS-ratio")
+
+srt.cts <- levels(log.rts$cell_type)
+rts.p[srt.cts] < 0.05
+
+fn <- paste0("ts_ratio_v3.pdf")
+pdf(file.path(cycif_fig_dir,"ts_axis",fn),width=6,height=7)
+print(p)
+dev.off()
+```
+
+### [Fig S9D] TS ratio for macropahges
+```{r}
+log.rts.mac <- log.rts %>%
+  filter(cell_type %in% uniq.cts[10:12]) %>%
+  mutate(cell_type=factor(cell_type,levels=uniq.cts[c(10,12,11)])) %>%
+  filter(!is.na(cell_type)) %>%
+  arrange(sample)
+# justify on the right
+lst.mac.ratio <- tapply(log.rts.mac$log_ratio,log.rts.mac$cell_type,identity)
+pvals <- rep(NA,3)
+for(i in 1:3){
+  idx <- list(c(1,2),c(1,3),c(2,3))[[i]]
+  p <- t.test(lst.mac.ratio[[idx[1]]],lst.mac.ratio[[idx[2]]],paired=T)$p.value
+  pvals[i] <- signif(p,3)
+}
+df.pvals <- data.frame(
+  x=c(1.5,2,2.5),
+  y=c(6.8,7.5,6.8),
+  pval=paste0("p=",pvals)
+)
+df.mid <- log.rts.mac %>%
+  group_by(cell_type) %>%
+  summarize(log_ratio=mean(log_ratio,na.rm=T)) %>%
+  mutate(sample="mid") %>%
+  mutate(x=c(1,2,3))
+
+p <- ggplot(log.rts.mac,aes(cell_type,log_ratio)) +
+  geom_violin(aes(fill=cell_type)) +
+  scale_fill_manual(values=ct.cols[uniq.cts[10:12]]) +
+  geom_point(size=.5,alpha=.8) +
+  geom_point(data=df.mid,aes(x=x,y=log_ratio),size=12,shape=95) +
+  geom_line(aes(group=sample),alpha=.5,color="grey30") +
+  geom_hline(yintercept = 0) +
+  ggtitle("log(Stroma/Tumor) ratio") +
+  geom_text(data=df.pvals,aes(x=x,y=y,label=pval))+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        legend.position="none") +
+  xlab("") +
+  ylab("log2(ratio of positive to negative distance)")
+
+fn <- paste0("ts_ratio_mac.pdf")
+pdf(file.path(cycif_fig_dir,"ts_axis",fn),width=3,height=7)
+print(p)
+dev.off()
+
+```
+
+### [Fig 5K] correlation between TS ratio and immune module activity
+```{r}
+rts.mat <- log.rts %>% 
+  spread(cell_type,log_ratio) %>% 
+  arrange(sample) %>%
+  select(-sample)
+
+pe <- cor(rts.mat,df.gs,method="pearson",use="pairwise.complete.obs")[rev(used.cts[-1]),]
+sp <- cor(rts.mat,df.gs,method="spearman",use="pairwise.complete.obs")[rev(used.cts[-1]),]
+
+pdf(file.path(cycif_fig_dir,"ts_axis","cor_w_ts_ratio","pearson_imm.pdf"),width=8,height=7)
+heatmap3(pe[,-1],Colv=NA,Rowv=NA,scale="none",balanceColor=TRUE,margins=c(10,10),main="pearson")
+dev.off()
+
+pdf(file.path(cycif_fig_dir,"ts_axis","cor_w_ts_ratio","spearman_imm.pdf"),width=8,height=7)
+heatmap3(sp[,-1],Colv=NA,Rowv=NA,scale="none",balanceColor=TRUE,margins=c(10,10),main="spearman")
+dev.off()
+```
+
+
+### [Fig SX] TS ratio: individual cell type's TS ratio vs activity of modules
+
+```{r}
+ucts <- used.cts[-1]
+colnames(df.gs) <- mod.nms <- colnames(pe)
+df.gs <- as.data.frame(df.gs)
+
+for(ct in ucts){
+  for(m in mod.nms[-1]){
+    ttl <- paste0(ct," vs ",m,"\n",
+                  "Pearson=",round(pe[ct,m],2),
+                  ",Spearman=",round(sp[ct,m],2))
+    df1 <- data.frame(df.gs[[m]],rts.mat[[ct]],nms)
+    names(df1) <- c("activity","log_ratio","sample")
+    p <- ggplot(df1,aes(x=activity,y=log_ratio)) +
+      geom_point() +
+      geom_smooth(method="lm",se=F,color="red") +
+      geom_text_repel(aes(label=sample),box.padding=1) +
+      geom_hline(yintercept=0) +
+      ggtitle(ttl) +
+      xlab(paste0(m," activity")) +
+      ylab(paste0("log2 (TS ratio)")) +
+      theme_minimal() +
+      theme(legend.position="none")
+    pdf(file.path(cycif_fig_dir,"ts_axis","cor_w_ts_ratio",
+                  paste0(ct,"_",sub("/","",m),".pdf")),width=7,height=7)
+    print(p)
+    dev.off()
+  }
+}
+```
+
+### [Fig 5A-1] distance on slides
+```{r}
+mean.sd <- round(mean(do.call(c,sds))) # mean distance between tumor region and tumor buds
+th <- round(mean.sd * 2)
+
+for(nm in nms){
+  x1 <- cs1[[nm]]
+  this.cts <- cell_types(x1)$cell_type
+  this.cts <- as.character(this.cts)
+  this.cts[is.na(this.cts)] <- "NA"
+
+  wr <- this.cts != "outOfROI"
+  
+  xy <- xys(x1)
+  xy$Y_centroid <- max(xy$Y_centroid) - xy$Y_centroid
+  xy.sf <- st_as_sf(xy[wr,],coords=c("X_centroid","Y_centroid"))
+  
+  obj <- lst.dists[[nm]]
+  is.non.na <- (this.cts != "NA")[this.cts != "outOfROI"]
+  obj <- obj[is.non.na]
+  
+  this.cts1 <- this.cts[wr]
+  this.d <- obj$dist
+  this.seg <- this.d$seg
+  this.points <- this.d$points
+  this.dist <- this.d$dist
+  this.b <- do.call(rbind,obj$borders)
+
+  tdist <- this.dist
+  tdist[tdist > th] <- th
+  tdist[tdist < -th] <- -th
+  
+  cols <- colorRampPalette((brewer.pal(11,"Spectral")))(th * 2 + 1)
+  names(cols) <- seq(-th,th)
+  
+  fn <- paste0("dist_ts_",nm,".png")
+  png(file.path(cycif_fig_dir,"ts_axis","slide_dist",fn),width=700,height=700)
+  plot(xy.sf[[1]],pch=".",add=F,col=cols[as.character(round(tdist))])
+  plot(this.b[[1]],add=T)
+  dev.off()
+}
+```
+
+### [Fig 5A-2] density for all cells, cancer cells, and non-cancer cells in 20um CN per cell type on slides
+```{r}
+for(nm in nms){
+  cat(nm,".. \n")
+  x <- cs1[[nm]]
+  
+  this.cts <- cell_types(cs1[[nm]])$cell_type
+  used.cts <- levels(this.cts)[1:12] # remove Imm_other, all_other, outOfROI
+  this.cts <- as.character(this.cts)
+  this.cts[is.na(this.cts)] <- "NA"
+  
+  is.used <- this.cts %in% used.cts
+  wr <- this.cts != "outOfROI"
+  
+  is.used.1 <- is.used[wr]
+  sgn.d <- lst.dists[[nm]]$dist$dist
+  sgn.d1 <- sgn.d[is.used]
+  
+  b <- do.call(rbind,lst.dists[[nm]]$borders)
+
+  xy <- xys(x)
+  xy$Y_centroid <- max(xy$Y_centroid) - xy$Y_centroid
+  xy1 <- xy[is.used,]
+  xy.sf1 <- st_as_sf(xy1,coords=c("X_centroid","Y_centroid"))
+
+  if(0){
+    ## used cells
+    plot(xy,col=is.used+1,pch='.')#,xlim=rim$x,ylim=rim$y)
+  
+    slidePlot(x,plot_type="cell_type",uniq.cols=ct.cols,draw.roi=TRUE)
+    table(this.cts[wr])
+  }
+
+  cn <- as.data.frame(lst.frnn[[nm]]@rcn.count[,]) %>%
+    mutate(dist=sgn.d1)
+
+  if(0){
+    ##
+    slidePlot(cs1[[nm]],plot_type="cell_type",uniq.cols=ct.cols,draw.roi=TRUE,uniq.cts="Cancer")
+    slidePlot(cs1[[nm]],plot_type="cell_type",uniq.cols=ct.cols,draw.roi=FALSE)
+  }
+  
+  ## all cell
+  n.cells <- rowSums(cn[,used.cts,drop=F]) + 1
+  th <- 20
+
+  n.cells[n.cells > th] <- th
+
+  cols <- colorRampPalette(brewer.pal(4,"YlGnBu"))(th)
+  names(cols) <- seq(th)
+
+  ## all cells  
+  fn <- paste0("cn_",nm,"_all.png")
+  png(file.path(cycif_fig_dir,"ts_axis","slide_ncells",fn),width=700,height=700)
+  plot(xy.sf1[[1]],col=cols[as.character(n.cells)],pch='.',main="# cells")
+  plot(b[[1]],border=1,lwd=.5,add=T)
+  dev.off()
+
+  ## cancer cells
+  n.tum <- rowSums(cn[,used.cts[1],drop=F]) + 1
+
+  n.tum[n.tum > th] <- th
+
+  cols <- colorRampPalette(brewer.pal(4,"YlGnBu"))(th)
+  names(cols) <- seq(th)
+  
+  fn <- paste0("cn_",nm,"_tum.png")
+  png(file.path(cycif_fig_dir,"ts_axis","slide_ncells",fn),width=700,height=700)
+  plot(xy.sf1[[1]],col=cols[as.character(n.tum)],pch='.',main="# cancer cells")
+  plot(b[[1]],border=1,lwd=.5,add=T)
+  dev.off()
+
+  if(0){
+    ## area
+    rim <- locator(2)
+    plot(xy.sf1[[1]],col=cols[as.character(n.tum)],pch='.',xlim=rim$x,ylim=rim$y)
+    plot(b[[1]],border=1,lwd=.5,add=T)
+  }
+  
+  ## # of stromal cells
+  n.str <- rowSums(cn[,used.cts[-1],drop=F]) + 1
+  n.str[n.str > th] <- th
+
+  cols <- colorRampPalette(brewer.pal(4,"YlGnBu"))(th)
+  names(cols) <- seq(th)
+  
+  fn <- paste0("cn_",nm,"_str.png")
+  png(file.path(cycif_fig_dir,"ts_axis","slide_ncells",fn),width=700,height=700)
+  plot(xy.sf1[[1]],col=cols[as.character(n.str)],pch='.',main="# non-cancer cells")
+  plot(b[[1]],border=1,lwd=.5,add=T)
+  dev.off()
+
+  ##
+  if(0){
+    set.seed(12345)
+    # smoothScatter(jitter(n.tum,amount=.5),jitter(n.str,amount=.5),pch=".")
+    smoothScatter(n.tum,n.str)
+    # abline(h=th,col=2)
+  
+    ##
+    plot(n.tum,n.str)
+    
+    ##
+    
+    for(ct in uniq.cts[2:12]){
+      n.ct <- cn[[ct]]
+      smoothScatter(n.str,n.ct,main=ct)
+      abline(a=0,b=1,lty=2)
+    }
+      
+    has.endo <- rowSums(cn[,"Endo",drop=F]) >0
+    n.cd8t <- rowSums(cn[,"CD8T",drop=F]) >0
+    n.mac <- rowSums(cn[,c("Mac_CD68","Mac_CD163"),drop=F]) >0
+    
+    # Assuming your_data is your dataset
+    normalized_data <- scale(your_data)  # Centers and scales (normalizes) each column
+    
+    # Now your_data is ready for k-means
+    set.seed(123)  # Set seed for reproducible results
+    kmeans_result <- kmeans(normalized_data, centers = 3)  # Example: clustering into 3 clusters
+  }
+}
+```
+
+## Cell neighborhood (CN) clustering
+
+### *****k-means clustering*****
+```{r}
+# [[[check these dim/length here]]]
+## distance from tumor border
+cts <- cell_types(cs1)
+
+is.used <- lapply(nms,function(nm){ ## is the cell types among used.cts
+  ct <- as.character(cts$cell_types[cts$sample==nm])
+  ct[is.na(ct)] <- "NA"
+  ct <- ct[ct != "outOfROI"]
+  is.used <- ct %in% used.cts
+  return(is.used)
+})
+names(is.used) <- nms
+
+lst.dist.ts <- lapply(nms,function(nm){ 
+  d <- lst.dists[[nm]]$dist$dist
+  d.used <- d[is.used[[nm]]]
+  return(d.used)
+})
+
+### from clusters
+
+## frnn
+lst.selected <- lapply(lst.frnn,function(x)x@is.selected) ## is the cells (used.cts == TRUE) positive for clustering
+lst.frnn.count <- lapply(lst.frnn,function(x)x@rcn.count[,used.cts])
+lst.frnn.bulk.exp <- lapply(lst.frnn,function(x){
+  tmp <- x@exp.per.cn
+  o <- order(tmp$cell_id)
+  tmp <- tmp[o,]
+  return(tmp)
+})
+lst.frnn.ct.exp <- lapply(lst.frnn,function(x)x@exp.per.ct.cn)
+
+```
+
+### `is.ge10` - cells with at least 10 cells in the neighborhood
+```{r}
+## combine
+is.selected <- unlist(lst.selected) # this is if the qualified cells (is.used == TRUE) are selected for clustering among
+
+n.smpls <- sapply(is.used,sum)
+smpls <- rep(nms,n.smpls)
+frnn.rcn <- do.call(rbind,lst.frnn.count) ## only within used.cts
+frnn.exp <- do.call(rbind,lst.frnn.bulk.exp)[,c(1:3,5,8)]
+# frnn.ct.exp <- do.call(rbind,lst.frnn.ct.exp) ## this is not good, as per cluster is not unique
+
+d <- unlist(lst.dist.ts) 
+
+frnn.rcn.n <- rowSums(frnn.rcn)
+
+is.ge10 <- frnn.rcn.n >= 10
+```
+
+```{r}
+## ct frequency per CN (# cells ≥ 10) ## 3266700 cells
+frnn.freq <- (frnn.rcn/(frnn.rcn.n[row(frnn.rcn)]))
+frnn.freq.sele <- frnn.freq[is.selected,]
+frnn.freq.ge10 <- frnn.freq[is.ge10,]
+```
+
+#### [Fig.S] number of cells in each cell neighborhood
+
+```{r}
+if(1){
+  pdf(file.path(cycif_fig_dir,"cn","n_cells_dist.pdf"),width=7,height=7)
+  par(mar=c(5,5,3,3))
+  hist(frnn.rcn.n,breaks=60,freq=F,border=NA,col="grey",
+       main="number of cells in cell neighborhood\n(all samples)",
+       xlab="# cells in cell neighborhood")
+  abline(v=10,col=1)
+  dev.off()
+}
+```
+
+
+### isometric log-ratio transformation of compositional data
+```{r}
+ilr.freq <- ilr(frnn.freq+1e-5)
+ilr.freq.ge10 <- ilr.freq[is.ge10,]
+```
+
+### PCA - this include all the samples, because the clustering is based on the cell type frequency
+```{r}
+# frnn
+smpls.ge10 <- factor(smpls[is.ge10],levels=nms)
+
+n.smpls <- table(smpls)
+n.smpls.ge10 <- table(smpls.ge10)
+
+n.draw <- 1e4
+
+set.seed(12345)
+lst.selected.ge10 <- lapply(nms,function(nm){
+  # n.true <- min(n.draw,n.smpls.ge10[nm])
+  n.true <- min(n.draw,n.smpls.ge10[nm])
+  n.false <- n.smpls.ge10[nm] - n.true
+  idx <- rep(c(TRUE,FALSE),c(n.true,n.false))
+  idx <- sample(idx)
+  return(idx)
+})
+is.selected.ge10 <- unlist(lst.selected.ge10)
+
+ilr.freq.ge10 <- ilr.freq[is.ge10,]
+```
+
+```{r}
+pca_result <- prcomp(ilr.freq.ge10[is.selected.ge10], 
+                     center = TRUE,
+                     scale=FALSE) 
+
+# checking to make sure rotation works!!
+ilr.freq.ctr <- apply(ilr.freq,2,#[is.selected.ge10,], 2, 
+        function(x) x - mean(x))
+
+pca_all <- ilr.freq.ctr %*% pca_result$rotation
+
+
+##
+var_explained <- pca_result$sdev^2 / sum(pca_result$sdev^2)
+cum_var_explained <- cumsum(var_explained)
+num_pc <- which(cum_var_explained >= 0.90)[1] # Number of PCs covering at least 90% variance = 8
+
+if(0){
+  plot(cum_var_explained, 
+       xlab = "Principal Component", 
+       ylab = "Cumulative Proportion of Variance Explained", type = "b")
+  # abline(v=num_pc,col=2)
+  abline(h=0.90, col=2)
+}
+
+# Step 2: Use the first few principal components for K-means
+pca_data_sele <- pca_result$x[, 1:num_pc]
+pca_data_all <- pca_all[, 1:num_pc]
+
+set.seed(12345)
+k <- 100
+
+system.time(
+  km <- kmeans(pca_data_sele, centers = k, iter.max = 20, nstart = 25)
+)
+
+if(0){
+  # compute distance betwen pca_data and centers -> straightforward but slow
+  cluster_assignments <- apply(pca_data_all,1,function(x){
+    dists <- apply(km$centers,1,function(y)sum((x-y)^2))
+    return(which.min(dists))
+  })
+}else{
+  # faster calculation of extrapolating kmeans
+  sum_squares_x <- rowSums(pca_data_all^2)
+  sum_squares_y <- rowSums(km$centers^2)
+  cross_term <- -2 * pca_data_all %*% t(km$centers)
+  squared_dists <- 
+    outer(sum_squares_x, sum_squares_y, "+") + cross_term
+  cluster_assignments0 <- cluster_assignments <- 
+    max.col(-squared_dists, ties.method = "first")
+
+  freq.clusts <- table(cluster_assignments)/length(cluster_assignments)
+}
+
+# sorted.clusts <- names(sort(table(cluster_assignments),decreasing=T))
+# cluster_assignments1 <- as.numeric(factor(cluster_assignments,levels=as.integer(sorted.clusts)))
+```
+
+### Compile `clfreq`  after `df`
+
+```{r}
+## correlation with module.activity
+smpls1 <- factor(smpls,levels=nms)
+cltab0 <- table(smpls1,cluster_assignments0)
+cltab0 <- array(cltab0,dim(cltab0))
+
+# convert table to matrix
+clfreq0 <- cltab0/array(rowSums(cltab0)[row(cltab0)],dim(cltab0))
+rownames(clfreq0) <- rownames(cltab0) <- nms
+colnames(clfreq0) <- colnames(cltab0) <- seq(ncol(cltab0))
+
+cor.sp0 <- cor(df.gs[,"ERS"],clfreq0,method="spearman")
+```
+
+### Reorder of clusters
+```{r}
+o <- order(cor.sp0,decreasing=T)  
+cluster_assignments <- as.numeric(factor(cluster_assignments0,levels=o))
+
+# barplot(table(cluster_assignments))
+```
+
+#### save `cluster_assignments`
+```{r}
+if(0){
+  saveRDS(cluster_assignments,
+          file.path(cycif_obj_dir,"cluster_assignments_kmeans_all_v1_102624.rds"))
+}else{
+  cluster_assignments <- readRDS(file.path(cycif_obj_dir,"cluster_assignments_kmeans_all_v1_102624.rds"))
+}
+```
+
+
+### `df`: combine all the information about CNs for further analysis
+```{r}
+# smpl: sample ID
+# knn.rcn: knn.rcn.cell-count
+# rad: radius of cell neighborhood
+# d: distance to tumor border
+# exp.cn: expression per cell neighborhood
+# cluster_assignments: cluster assignments
+
+cts <- cell_types(cs1)
+used.cts <- levels(cts$cell_types)[1:12]
+is.used.cts <- cts$cell_types %in% used.cts
+
+used.abs <- c("PD1","HLAABC","HLADPB1","ERa")#,"pTBK1")
+k1 <- max(as.numeric(cluster_assignments))
+xys.all <- do.call(rbind,cyApply(cs1,xys))
+xys.sele <- xys.all[is.used.cts,]
+
+cts.sele <- cts %>%
+  filter(is.used.cts) %>%
+  mutate(cell_id = unlist(sapply(nms,function(nm)seq(sum(sample==nm))))) %>%
+  select(-sample)
+
+tmp1 <- data.frame(smpl=factor(smpls,levels=nms),
+                   cluster=factor(cluster_assignments,levels=(1:k1)),
+                   d=d,
+                   n=frnn.rcn.n,
+                   is.selected=is.selected)
+df.cn <- cbind(tmp1,
+            cts.sele,            
+            xys.sele,
+            frnn.freq,
+            frnn.exp[, .SD, .SDcols = used.abs])
+```
+
+### `bin_values`: binned distance
+```{r}
+bin_values <- function(x, width = 20) {
+  bin_start <- floor((x + width/2) / width) * width
+  return(bin_start)
+}
+
+df.cn <- df.cn %>% mutate(d1=bin_values(d,width=20))
+```
+
+
+### save `df.cn` for further analysis
+```{r}
+if(0){
+  saveRDS(df.cn,file.path(cycif_obj_dir,"df.cn.rds"))
+}else{
+  df.cn <- readRDS(file.path(cycif_obj_dir,"df.cn.rds"))
+}
+```
+## T cells (CD4 + CD8 T cells) -----
+### Analysis along tumor-stroma axis
+#### `moving_average` function: smoothening the counts
+```{r}
+## values are averaged by bin_values (binning by 20 pixels, then moving average by 10 running bins)
+moving_average <- function(y, n = 3) {
+  # Create a filter that averages 'n' points
+  filter <- rep(1/n, n)
+  # Apply the filter to the y values
+  stats::filter(y, filter, sides = 2)
+}
+```
+
+### [Fig 5E] # of T cells per distance
+```{r}
+df.cn.t0 <- df.cn.t %>% 
+  filter(is.selected) %>%
+  filter(n.t.48 > 0)
+
+n.t.48 <- df.cn.t0$n.t.48
+
+n5 <- df.cn.t %>%
+  filter(cell_types != "Cancer") %>%
+  group_by(d1) %>%
+  summarize(non_cancer = n(), .groups = "drop") %>%
+  left_join(df.cn.t %>%
+    filter(cell_types %in% c("CD4T_Treg", "CD4T_nonTreg", "CD8T", "T_other")) %>%
+    group_by(d1, cell_types) %>%
+    summarize(count = n(), .groups = "drop") %>%
+    pivot_wider(names_from = cell_types, values_from = count, values_fill = 0),
+  by = "d1") %>%
+  replace(is.na(.), 0)
+
+rth <- 20 # averaging across 10 consecutive points
+
+r5.1 <- n5 %>%
+  ## freqeuncy among non_cancer cells
+  mutate(CD4T_Treg=CD4T_Treg/non_cancer) %>%
+  mutate(CD4T_nonTreg=CD4T_nonTreg/non_cancer) %>%    
+  mutate(CD8T=CD8T/non_cancer) %>%
+  mutate(T_other=T_other/non_cancer) %>%
+
+  ## smoothening effect  
+  mutate(CD4T_Treg = moving_average(CD4T_Treg, n = rth)) %>%
+  mutate(CD4T_nonTreg = moving_average(CD4T_nonTreg, n = rth)) %>%
+  mutate(CD8T = moving_average(CD8T, n = rth)) %>%
+  mutate(T_other = moving_average(T_other, n = rth)) %>%
+
+  ## pixel to um
+  mutate(d1 = d1 * 0.65) %>%
+
+  ## normalize the values within each cell type  
+  filter(d1 >= -500 & d1 <= 1500) %>%  
+  mutate(CD4T_Treg=CD4T_Treg/max(CD4T_Treg,na.rm=T)) %>%
+  mutate(CD4T_nonTreg=CD4T_nonTreg/max(CD4T_nonTreg,na.rm=T)) %>%
+  mutate(CD8T=CD8T/max(CD8T,na.rm=T)) %>%
+  mutate(T_other=T_other/max(T_other,na.rm=T)) %>%
+  
+  tidyr::gather("cell_types","freq",3:6) %>%
+  mutate(freq = ifelse(is.na(freq),0,freq)) %>%
+  mutate(cell_types = factor(cell_types,levels=c("CD8T","CD4T_nonTreg","CD4T_Treg","T_other"))) %>%
+
+  filter(d1 !=0 | freq != 0)
+
+```
+
+```{r}
+p1 <- ggplot(r5.1,aes(x=d1,y=freq,color=cell_types)) +
+    geom_vline(xintercept=0,col=1) +
+    geom_vline(xintercept=500,linetype=2) +
+    geom_hline(yintercept=0,col=1) +    
+    geom_line(linewidth=2) +
+    xlab("Distance from tumor border (µm)") +
+    ylab("Mean T cell frequency over non-T cells at each distance") +
+    ggtitle("Spatial distribution of T cells and distance from tumor border") +
+    theme_minimal()
+
+pdf(file.path(cycif_fig_dir,"t_cell","T_freq_per_distance_v2.pdf"),width=7,height=7)
+print(p1)
+dev.off()
+```
+
+### [Fig 5F] # of T cells per distance 
+```{r}
+exp5 <- df.cn.t %>%
+  filter(cell_types != "Cancer") %>%
+  group_by(d1) %>%
+  summarize(non_cancer = n(), .groups = "drop") %>% # n0 up to here
+  left_join(df.cn.t %>%
+    filter(cell_types %in% c("CD4T_Treg", "CD4T_nonTreg", "CD8T", "T_other")) %>%
+    group_by(d1, cell_types) %>%
+    summarize(exps = mean(n.t.all,na.rm=T), .groups = "drop") %>%
+    pivot_wider(names_from = cell_types, values_from = exps, values_fill = 0),
+  by = "d1") %>%
+  replace(is.na(.), 0)
+
+r5.2 <- exp5 %>%
+  
+  mutate(CD4T_Treg=CD4T_Treg) %>%
+  mutate(CD4T_nonTreg=CD4T_nonTreg) %>%    
+  mutate(CD8T=CD8T) %>%
+  mutate(T_other=T_other) %>%
+  
+  mutate(d1 = d1 * 0.65) %>%
+  mutate(CD4T_Treg = moving_average(CD4T_Treg, n = rth)) %>%
+  mutate(CD4T_nonTreg = moving_average(CD4T_nonTreg, n = rth)) %>%
+  mutate(CD8T = moving_average(CD8T, n = rth)) %>%
+  mutate(T_other = moving_average(T_other, n = rth)) %>%
+  
+  tidyr::gather("cell_types","N_T_cells",3:6) %>%
+  
+  filter(!is.na(N_T_cells)) %>%
+  filter(d1 >= -500 & d1 <= 1500) %>%
+  mutate(cell_types = factor(cell_types,levels=c("CD8T","CD4T_nonTreg","CD4T_Treg","T_other")))
+  
+
+```
+
+```{r}
+p2 <- ggplot(r5.2,aes(x=d1,y=N_T_cells,color=cell_types)) +
+    geom_vline(xintercept=0,col=1) +
+    geom_vline(xintercept=500,col=1,linetype=2) +  
+    geom_hline(yintercept=0,col=1) +    
+    geom_line(size=2) +
+    xlab("Distance from tumor border (µm)") +
+    ylab("Mean T cell density per CN at each distance") +
+    ggtitle("Local T cell density and distance from tumor border") +
+    theme_minimal()
+
+pdf(file.path(cycif_fig_dir,"t_cell","T_density_per_CN_per_distance_v2.pdf"),width=7,height=7)
+print(p2)
+dev.off()
+```
+
+## t.n vs expression -------
+### [Fig 5G] PD1 expression and T cell density
+
+```{r}
+t.subs <- c("CD8T","CD4T_nonTreg","CD4T_Treg","T_other")
+
+log.exp <- exprs(cs1,type="log")
+
+era <- log.exp[is.used.cts,"ERa"]
+pd1 <- log.exp[is.used.cts,"PD1"]
+hlaabc <- log.exp[is.used.cts,"HLAABC"]
+hladpb1 <- log.exp[is.used.cts,"HLADPB1"]
+
+## expression within individual cell (as opposed to mean expression per CN incorporated in df.cn.t)
+df.cn.t1 <- df.cn.t %>% 
+  mutate(PD1.self=pd1) %>%
+  mutate(HLAABC.self=hlaabc) %>%
+  mutate(HLADPB1.self=hladpb1) %>%
+  mutate(ERa.self=era)
+
+df.cn.t2 <- df.cn.t1 %>%
+  filter(cell_types %in% t.subs) %>%
+  filter(n.t.all > 0)
+
+nts <- as.integer(df.cn.t2$n.t.all)
+uniq.nt <- unique(sort(nts))
+
+# select sn0(=1000) cells per each T cell density: ids
+sn0 <- 1e3
+set.seed(12345)
+
+ids <- list()
+for(nt in uniq.nt){
+  idx <- which(nts == nt)
+  if(length(idx) > 1){
+    sn <- min(sn0,length(idx))
+    idx <- sample(idx,sn)
+    ids[[as.character(nt)]] <- idx
+  }  
+}
+ids <- unlist(ids)
+
+df.cn.t2.sele <- df.cn.t2 %>% filter(seq(nrow(df.cn.t2)) %in% ids)
+
+lms <- list()
+for(ct in t.subs){
+  lms[[ct]] <- lm(PD1.self ~ n.t.all,
+                  data=df.cn.t2.sele %>% filter(cell_types == ct))
+}
+
+p.vals <- sapply(lms,function(lm1)summary(lm1)$coefficient[2,4])
+legs <- paste0(c("CD8T","CD4T_nonTreg","CD4T_Treg","T_other")," (p=",signif(p.vals,2),")")
+legs <- sub("p=0","p<2.2e-308",legs)
+
+# dcs <- densCols(df.cn.t2.sele$n.t.48,df.cn.t2.sele$PD1.self)
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100)[1:n]
+}
+cols <- gg_color_hue(4)
+
+pdf(file.path(cycif_fig_dir,"t_cell","PD1_per_distance_v2.pdf"),width=7,height=7)
+par(mar=c(5,5,3,3))
+smoothScatter(df.cn.t2.sele$n.t.48,df.cn.t2.sele$PD1.self,pch=20,cex=.3,
+              # colramp=cols,
+              nbin=128,
+              transformation = function(x)x^.5,
+     xlab="T cell density/CN",ylab="PD1 expression in T cells",
+     main="PD1 expression vs T cell density")
+for(i in 1:4){
+  abline(lms[[i]],col=cols[i],lwd=2)
+}
+
+legend("bottomright",
+       legend=legs,
+       col=cols,lty=1,lwd=2,cex=1)
+dev.off()
+```
+
+### [Fig 5I-1] T cell density per sample vs PD1 expression
+```{r}
+if(0){
+  ## compute T cell density per sample
+  nms <- names(cs1)
+  
+  areas <- list()
+  for(nm in nms){
+    cat(nm,"\n")
+    areas[[nm]] <- computeArea(cs1[[nm]],dth=dth,plot=FALSE) 
+  }
+  areas <- do.call(c,areas)
+
+  saveRDS(areas,file.path(cycif_obj_dir,"cs1_areas.rds"))
+}else{
+  areas <- readRDS(file.path(cycif_obj_dir,"cs1_areas.rds"))
+}
+
+```
+
+```{r}
+tab.cts <- table(cell_types(cs1))[,t.subs]
+n.t.smpl <- rowSums(tab.cts)
+
+n.t.smpl.dens <- n.t.smpl/areas
+
+xh <- hist(df.cn.t2.sele$n.t.all,breaks=50,plot=F)
+# abline(h=500,col=2)
+idx <- max(which(xh$counts >= 500))
+
+df.cn.t2$n.t.all[df.cn.t2$n.t.all > idx] <- idx ## note df.cn.t2.sele can't be used - number of T cells per sample is not the same
+
+df.cn.t3 <- df.cn.t2 %>%
+  filter(cell_types %in% c("CD4T_Treg","CD4T_nonTreg","CD8T","T_other")) %>%
+  group_by(smpl) %>%
+  summarize(n.t.sum=length(n.t.all),
+            n.t.ge5=sum(n.t.all >= 5,na.rm=T),
+            r.t.ge5=n.t.ge5/n.t.sum,
+            n.pd1=mean(PD1.self,na.rm=T),
+            .groups="drop") %>%
+  mutate(area = areas[smpl]) %>%
+  mutate(n.t.smpl.dens=n.t.smpl.dens) %>%
+  mutate(n.t.ge5.dens=n.t.ge5/area)
+```
+
+
+```{r}
+cor1 <- cor(df.cn.t3$n.t.smpl.dens,df.cn.t3$n.pd1,method="spearman")
+p1 <- ggplot(df.cn.t3,aes(x=n.t.smpl.dens,y=n.pd1,label=smpl,color=as.numeric(smpl))) +
+  geom_point() +
+  scale_x_log10() +
+  geom_text_repel() +
+  theme_minimal() +
+  # theme(legend.position = "none") +  
+  ggtitle(paste0("T cell density vs PD1 expression (SCC: ",round(cor1,3),")")) +
+  xlab("T cell density (count/mm2)") +
+  ylab("Mean PD1 expression per sample")
+```
+
+### [Fig 5I-2] clustered T cell density vs PD1 expression
+```{r}
+cor2 <- cor(df.cn.t3$r.t.ge5,df.cn.t3$n.pd1,method="spearman")
+p2 <- ggplot(df.cn.t3,aes(x=r.t.ge5,y=n.pd1,label=sub("df","",smpl),color=30-as.numeric(smpl))) +
+  geom_point(size=2) +
+  geom_text_repel(size=6) +
+  theme_minimal() +
+  # theme(legend.position = "none") +
+  labs(color="") +
+  ggtitle(paste0("Clustered T cell frequency vs PD1 expression (SCC: ",round(cor2,3),")")) +
+  xlab("Frequency of clustered T cells (> 5/CN) over all T cells") + 
+  ylab("Mean PD1 expression per sample")
+```
+
+### [Fig 5I-3] clustered T cell density vs PD1 expression (not used)
+```{r}
+cor3 <- cor(df.cn.t3$n.t.ge5.dens,df.cn.t3$n.pd1,method="spearman")
+
+p3 <- ggplot(df.cn.t3,aes(x=n.t.ge5.dens,y=n.pd1,label=sub("df","",smpl),color=as.numeric(smpl))) +
+  geom_point(size=2) +
+  geom_text_repel(size=6) +
+  scale_x_log10() +
+  theme_minimal() +
+  # theme(legend.position = "none") +  
+  ggtitle(paste0("T cell density vs PD1 expression (SCC: ",round(cor1,3),")")) +
+  xlab("T cell density (count/mm2)") +
+  ylab("Mean PD1 expression per sample")
+```
+
+```{r}
+##
+pdf(file.path(cycif_fig_dir,"t_cell","T_density_vs_PD1_v2.pdf"),width=7,height=7)
+print(p1)
+dev.off()
+
+##
+pdf(file.path(cycif_fig_dir,"t_cell","clustered_T_vs_PD1_v2.pdf"),width=7,height=7)
+print(p2)
+dev.off()
+
+##
+pdf(file.path(cycif_fig_dir,"t_cell","clustered_T_density_vs_PD1_v2.pdf"),width=7,height=7)
+print(p3)
+dev.off()
+```
+
+### [Fig S9B-right] PD1 expression per T cell subtype and 
+```{r}
+ab <- "PD1.self"
+rth <- 20
+m.pd1 <- df.cn.t2 %>%
+  filter(cell_types %in% t.subs) %>%
+  group_by(d1,cell_types) %>%
+  summarize(expression=mean(!!sym(ab),na.rm=T),.groups="drop") %>%
+  filter(!is.na(d1)) %>%
+  complete(d1 = full_seq(d1, 20)) %>%   # Add missing x values
+  arrange(cell_types,d1) %>%
+  mutate(expression = zoo::na.approx(expression, na.rm = FALSE)) %>%
+  mutate(expression = moving_average(expression,rth)) %>%# Interpolate y values using na.approx from zoo
+  mutate(d1 = d1 * 0.65) %>%
+  filter(d1 >= -500 & d1 <= 1500)# Interpolate y values using na.approx from zoo
+
+df.cn4.seg <- data.frame(i=factor(c(1,1,2,2)),
+                      x1=c(-300,-150,150,300),
+                      y1=rep(7.5,4))
+
+p.pd1 <- ggplot(m.pd1,aes(x=d1,y=expression,color=cell_types)) +
+  geom_vline(xintercept=0,col=1) +
+  geom_line(size=1) +
+  # geom_line(data=df.cn4.seg,aes(x=x1,y=y1,group=i),color=1,size=2) +
+  theme_minimal() +
+  ggtitle("PD1 expression along tumor-stromal axis") +
+  xlab("Distance from tumor border  (µm)") +
+  ylab("mean PD1 expression")
+
+pdf(file.path(cycif_fig_dir,"t_cell","PD1_per_distance_v2.pdf"),width=7,height=7)
+print(p.pd1)
+dev.off()
+
+```
+
+## Co-localization of cell types  -------
+### [Fig 5J] co-localization within CNs
+```{r}
+til_associated <- c("CD8T","CD4T_nonTreg","CD4T_Treg","Mac_CD68_CD163","Mac_CD163")
+is.ta <- uniq.cts[1:12] %in% til_associated
+names(is.ta)<- uniq.cts[1:12]
+scol1 <- cbind(t_assoc=c("grey80","black")[is.ta+1])
+
+## this is not corrected for the number of cells per sample ?? No?
+cor.freq <- cor(frnn.freq.sele,method="spearman")
+pdf(file.path(cycif_fig_dir,"cn","cor_sp_freq_v2.pdf"),width=7,height=7)
+heatmap3(cor.freq,scale="none",
+         main="co-localization of cell types\n(co-occurrence in CNs)",balanceColor=TRUE,margins=c(10,10),
+         RowSideColors=scol1,ColSideColors=scol1)
+dev.off()
+```
+
+## Mac distribution -------
+
+### [Fig 5L] (former 5K) count cell types per distance 
+```{r}
+n0 <- df.cn.t %>%
+  filter(is.selected) %>%
+  filter(cell_types != "Cancer") %>%
+  group_by(d1) %>%
+  summarize(non_cancer=n())
+
+n1 <- df.cn.t %>% 
+  filter(is.selected) %>%
+  filter(cell_types == "Mac_CD68") %>%
+  group_by(d1) %>%
+  summarize(Mac_CD68=n())
+
+n2 <- df.cn.t %>% 
+  filter(is.selected) %>%
+  filter(cell_types == "Mac_CD163") %>%
+  group_by(d1) %>%
+  summarize(Mac_CD163=n())
+
+n3 <- df.cn.t %>% 
+  filter(is.selected) %>%
+  filter(cell_types == "Mac_CD68_CD163") %>%
+  group_by(d1) %>%
+  summarize(Mac_CD68_CD163=n())
+
+n5 <- n0 %>%
+  left_join(n1,by="d1") %>%
+  left_join(n2,by="d1") %>%
+  left_join(n3,by="d1")
+
+n5[is.na(n5)] <- 0
+
+rth <- 20
+
+m5 <- n5 %>%
+
+  mutate(d1 = d1 * 0.65) %>%
+
+  mutate(Mac_CD68=Mac_CD68/non_cancer) %>%
+  mutate(Mac_CD163=Mac_CD163/non_cancer) %>%
+  mutate(Mac_CD68_CD163=Mac_CD68_CD163/non_cancer) %>%
+
+  mutate(Mac_CD68 = moving_average(Mac_CD68, n = rth)) %>%
+  mutate(Mac_CD163 = moving_average(Mac_CD163, n = rth)) %>%
+  mutate(Mac_CD68_CD163 = moving_average(Mac_CD68_CD163, n = rth)) %>%
+
+  filter(d1 >= -500 & d1 <= 1500) %>%
+  mutate(Mac_CD68=Mac_CD68/max(Mac_CD68,na.rm=T)) %>%
+  mutate(Mac_CD163=Mac_CD163/max(Mac_CD163,na.rm=T)) %>%
+  mutate(Mac_CD68_CD163=Mac_CD68_CD163/max(Mac_CD68_CD163,na.rm=T)) %>%
+    
+  tidyr::gather("cell_types","freq",3:5) %>%
+  mutate(freq = ifelse(is.na(freq),0,freq)) %>%
+  mutate(cell_types = factor(cell_types,levels=c("Mac_CD68","Mac_CD163","Mac_CD68_CD163"))) %>%
+
+  filter(d1 != 0 | freq != 0)
+
+p.m <- ggplot(m5,aes(x=d1,y=freq,color=cell_types)) +
+    geom_vline(xintercept=0,col=1) +
+    geom_vline(xintercept=500,linetype=2) +
+    geom_hline(yintercept=0,col=1) +    
+    geom_line(size=2) +
+    xlab("Distance from tumor border (µm)") +
+    ylab("Mean # of Macrophage frequency") +
+    ggtitle("Spatial distribution of macrophages") +
+    theme_minimal()
+
+pdf(file.path(cycif_fig_dir,"ts_axis","macs","plot_mac_freq_v2.pdf"),width=7,height=7)
+print(p.m)
+dev.off()
+```
+
+## Endothelial cell distribution  -------
+### Endo size and distance
+```{r}
+if(0){
+  plot(as.numeric(cor.sp))
+  abline(h=0)
+  abline(h=c(0.05,-0.05),lty=2)
+  abline(h=c(0.1,-0.1),lty=2)
+  pos.cl <- which(cor.sp > 0.1)
+  neg.cl <- which(cor.sp < -0.1)
+  dir.cl <- rep("",length(df.cn$cluster))
+  dir.cl[as.character(df.cn$cluster) %in% as.character(pos.cl)] <- "pos"
+  dir.cl[as.character(df.cn$cluster) %in% as.character(neg.cl)] <- "neg"
+  cts.this <- cts$cell_types[cts$cell_types %in% used.cts]
+  
+  df.cn <- df.cn %>%
+    mutate(cts=cts.this) %>%
+    mutate(dir_cl=dir.cl)
+    
+  endo.pos <- endo.neg <- list()  
+  for(nm in nms){
+    df.cn1 <- df.cn %>% 
+      filter(smpl==nm) %>%
+      filter(cell_types %in% c("Endo"))
+    
+    df.cn1.pos <- df.cn1 %>% 
+      filter(dir_cl=="pos") %>%
+      select(X_centroid,Y_centroid)
+    
+    df.cn1.neg <- df.cn1 %>% 
+      filter(dir_cl=="neg") %>%
+      select(X_centroid,Y_centroid)    
+    
+    ##
+    tmp <- dbscan::dbscan(df.cn1.pos, eps=dth, 
+                             minPts = 2, 
+                             weights = NULL, 
+                             borderPoints = TRUE)$cluster
+    idx <- which(tmp==0)
+    max.i <- max(tmp)
+    tmp[idx] <- seq(idx) + max.i
+    # endo.pos[[nm]] <- paste0(nm,".",tmp)
+    endo.pos[[nm]] <- tmp
+  
+    ##
+    tmp <- dbscan::dbscan(df.cn1.neg, eps=dth, 
+                             minPts = 2, 
+                             weights = NULL, 
+                             borderPoints = TRUE)$cluster
+    idx <- which(tmp==0)
+    max.i <- max(tmp)
+    tmp[idx] <- seq(idx) + max.i
+    # endo.neg[[nm]] <- paste0(nm,".",tmp)
+    endo.neg[[nm]] <- tmp
+  }  
+  n.ep <- sapply(endo.pos,length)
+  v.n.ep <- rep(c(0,n.ep[-length(n.ep)]),n.ep)
+  
+  n.en <- sapply(endo.neg,length)
+  v.n.en <- rep(c(0,n.en[-length(n.en)]),n.en)
+  
+  epos <- unlist(endo.pos) + v.n.ep
+  eneg <- unlist(endo.neg) + v.n.en
+  epos1 <- table(table(epos))
+  eneg1 <- table(table(eneg))
+  
+  ## average size per connected network
+  sum(epos1 * as.numeric(names(epos1)))/sum(epos1)
+  sum(eneg1 * as.numeric(names(eneg1)))/sum(eneg1)
+  
+  # boxplot(list(pos=epos1,neg=eneg1),las=2)
+  # boxplot(list(neg=eneg1),las=2,ylim=c(0,100))
+}
+```
+
+### [Fig 5N-1] vascular cluster size and depth
+
+```{r}
+### mean distance and size (forget about the pos and neg)
+e.size <- e.d <- list()  
+
+for(nm in nms){
+  cat(nm,"..\n")
+  df.cn1 <- df.cn %>%
+    filter(smpl==nm) %>%
+    filter(cell_types %in% c("Endo"))
+  
+  df.cn1.xy <- df.cn1 %>%
+    select(X_centroid,Y_centroid)   
+    
+  ##
+  tmp <- dbscan::dbscan(df.cn1.xy, eps=dth, 
+                           minPts = 2, 
+                           weights = NULL, 
+                           borderPoints = TRUE)$cluster
+  idx <- which(tmp==0)
+  max.i <- max(tmp)
+  tmp[idx] <- seq(idx) + max.i
+  
+  e.size[[nm]] <- table(tmp) # endothelial network id and the size
+  e.d[[nm]] <- tapply(df.cn1$d,tmp,mean)
+  # endo.pos[[nm]] <- paste0(nm,".",tmp)
+}  
+
+es.distrib <- lapply(e.size,function(s1){
+  n1 <- table(s1)
+  n.network <- rep(as.numeric(names(n1)),n1)
+  n.all <- rep(n.network,n.network)
+  return(n.all)
+})
+
+es.distance <- lapply(names(e.size),function(nm){
+  s1 <- e.size[[nm]]
+  d1 <- e.d[[nm]]
+  v.d <- rep(d1,s1)
+  return(v.d)
+})
+
+boxplot(e.d)
+abline(h=0,col=2)
+
+mean.es <- sapply(es.distrib,function(x)mean(x>10))
+plot(df.gs[,2],mean.es)
+
+mean.ds <- sapply(e.d,function(x)mean(x>0),na.rm=T)
+plot(df.gs[,2],mean.ds)
+
+###
+es1 <- unlist(e.size)
+ed1 <- unlist(e.d) * .65
+
+rth <- 20
+e.df <- data.frame(d=unlist(es.distance),size=unlist(es.distrib)) %>%
+  arrange(d) %>%
+  mutate(d1=bin_values(d,width=50)) %>%
+  group_by(d1) %>%
+  summarize(size=quantile(size,.5),.groups="drop") %>%
+  mutate(size = moving_average(size, n = rth)) %>%
+  # summarize(size=mean(size)) %>%
+  filter(d1 >= -800 & d1 <= 2000)
+
+cols <- gg_color_hue(2)
+p <- ggplot(e.df,aes(x=d1,y=size)) +
+  geom_line(size=2,color=cols[1]) +
+  geom_vline(xintercept=0,col=1) +
+  geom_vline(xintercept=500,col=1,linetype=2) +
+  geom_hline(yintercept=0,col=1) +    
+  xlab("Distance from tumor border (µm)") +
+  ylab("Mean endo network size") + 
+  ggtitle("Distribution of endothelial network size along tumor-stroma axis") + 
+  theme_minimal()
+
+pdf(file.path(cycif_fig_dir,"ts_axis","endo","median_endo_size_freq_v2.pdf"),width=7,height=7)
+print(p)
+dev.off()
+```
+
+
+```{r}
+# e.df.sum <- data.frame(d=ed1,size=es1)  
+# e.df1 <- e.df.sum %>%  filter(d < 1000 & d > -500 & size < 200) 
+# 
+# abline(h=0,v=0)
+# lines(e.df.r,lty=2)
+# smpl <- rep(nms,sapply(e.size,length))
+```
+
+```{r}
+# n.endo <- sapply(e.size,length)
+# hist(es1,breaks=1000,ylim=c(0,1000),xlim=c(0,200))
+# mean.es1 <- tapply(es1>20,smpl,mean)
+# plot(n.endo,mean.es1)
+```
+
+```{r}
+if(0){
+  pdf(file.path(cycif_fig_dir,"cn_various","endo_size_dist.pdf"),width=7,height=7)
+  par(mar=c(5,5,3,3))
+  smoothScatter(ed1,es1,colramp=colorRampPalette(c("white",blues9[-(1:2)])),
+                main="relationship between vascular cluster size and depth",
+                xlab="mean distance from tumor border (µm)",
+                ylab="vascular network size (n cells)")
+  abline(h=0,v=0)
+  th <- 500 * .65
+  abline(v=c(-th,th),lty=2)
+  abline(h=40,lty=2)
+  dev.off()
+}
+```
+
+### [Fig 5N-2] endo size and distance distribution
+```{r}
+bin_values <- function(x, width = 20) {
+  bin_start <- floor((x + width/2) / width) * width
+  return(bin_start)
+}
+
+n0 <- df.cn.t0 %>%
+  group_by(d1) %>%
+  summarize(n=n())
+
+n.endo <- data.frame(smpl=factor(smpl,levels=nms),e.size=es1,e.dist=ed1) %>%
+  mutate(d1=bin_values(e.dist,width=20))
+  # group_by(d1) %>%
+  # summarize(n.all=sum(n.cells),.groups="drop")
+
+n.endo.large <- n.endo %>%
+  filter(e.size > 40) %>%
+  group_by(d1) %>%
+  summarize(n.cells.large = sum(e.size),.groups="drop")
+  # mutate(size.loc="large") %>%
+  # mutate(size.loc=factor(size.loc,levels=c("small","large")))# %>%
+  
+n.endo.small <- n.endo %>%
+  filter(e.size <= 40) %>%
+  group_by(d1) %>%
+  summarize(n.cells.small = sum(e.size),.groups="drop")
+  # mutate(size.loc="small") %>%
+  # mutate(size.loc=factor(size.loc,levels=c("small","large")))
+
+rth <- 20
+n.e <- n0 %>% 
+  rename(n.all=n) %>% 
+  
+  left_join(n.endo.large,by="d1") %>%
+  left_join(n.endo.small,by="d1") %>%
+  filter(!is.na(n.cells.large) | !is.na(n.cells.small)) %>%
+  
+  mutate(n.cells.large = ifelse(is.na(n.cells.large),0,n.cells.large)) %>%
+  mutate(n.cells.small = ifelse(is.na(n.cells.small),0,n.cells.small)) %>%
+  mutate(large = n.cells.large/n.all) %>%
+  mutate(small = n.cells.small/n.all) %>%
+  mutate(large = moving_average(large, n = rth)) %>%
+  mutate(small = moving_average(small, n = rth)) %>%
+  
+  mutate(d1 = d1 * 0.65) %>%
+  filter(d1 >= -500 & d1 <= 1500) %>%
+  mutate(large = large/max(large,na.rm=T)) %>%
+  mutate(small = small/max(small,na.rm=T)) %>%
+  select(c(1,5:6)) %>%
+  gather("size","ratio",2:3)
+
+
+p <- ggplot(n.e,aes(x=d1,y=ratio,color=size)) +
+  geom_vline(xintercept=0,col=1) +
+  geom_vline(xintercept=500,col=1,linetype=2) +  
+  geom_hline(yintercept=0,col=1) +    
+  geom_line(size=2) +
+  # geom_vline(xintercept=1000,linetype=2) +
+  xlab("Distance from tumor border (µm)") +
+  ylab("Frequency of Endo among non-cancer cells") + 
+  ggtitle("Distribution of endothelial cells along tumor-stroma axis") + 
+  theme_minimal()
+
+pdf(file.path(cycif_fig_dir,"ts_axis","endo","plot_endo_size_freq_v2.pdf"),width=7,height=7)
+print(p)
+dev.off()
+```
+
+
+### [Fig 5P] microvascular density and NFkB activity
+```{r}
+d1 <- 500
+n1 <- 40
+
+n.all.nont <- df.cn %>%
+  filter(!is.na(d)) %>%
+  filter(!cell_types %in% c("Cancer")) %>%
+  mutate(is.stroma = factor(d > d1,levels=c("TRUE","FALSE"))) %>%
+  group_by(smpl) %>%
+  summarize(n.str.nont = sum(is.stroma=="TRUE"),n.tum.nont = sum(is.stroma=="FALSE"))# %>%
+  # mutate(log.st.ratio = log2(n.str/n.tum)) %>%
+  # pull(log.st.ratio)
+
+n.all <- df.cn %>% 
+  filter(!is.na(d)) %>%
+  group_by(smpl) %>%
+  summarize(n.all = n())
+  
+##
+n.endo <- data.frame(smpl=factor(smpl,levels=nms),e.size=es1,e.dist=ed1) %>%
+  filter(!is.na(e.dist)) %>%
+  mutate(size.small = factor(e.size < n1,levels=c("TRUE","FALSE"))) %>%
+  mutate(is.stroma = factor(e.dist > d1,levels=c("TRUE","FALSE"))) %>%
+  mutate(size.loc=paste0(size.small,".",is.stroma)) %>%
+  mutate(size.loc=factor(size.loc,levels=c("TRUE.TRUE","TRUE.FALSE","FALSE.TRUE","FALSE.FALSE"))) %>%
+  mutate(size.loc=factor(size.loc,labels=c("small.stroma","small.tumor","large.stroma","large.tumor"))) %>%
+  group_by(smpl,size.loc) %>%
+  summarize(n.cells = sum(e.size),.groups="drop") %>%
+  # complete(size.loc, fill = list(sum_value = NA))# %>%
+  # filter(size.small=="TRUE") %>%
+  # group_by() %>%
+  pivot_wider(
+      names_from = size.loc,    # Define where to get the names for the new columns
+      values_from = n.cells, # Define which column provides the values
+      values_fill = list(value = 0) # Fill missing values with 0
+  ) #%>%
+n.endo[is.na(n.endo)] <- 0
+n.endo <- n.endo %>%
+  # spread(size.loc,n.cells,fill=list(value1=0,value2=0)) %>%
+  mutate(n.endo.all = `small.stroma`+`small.tumor`+`large.stroma`+`large.tumor`) %>%
+  mutate(n.small = `small.stroma` + `small.tumor`) %>%
+  mutate(n.large = `large.stroma` + `large.tumor`)
+
+n.endo1 <- n.endo %>%
+  left_join(n.all.nont,by="smpl") %>%
+  mutate(r.small.str = `small.stroma`/`n.str.nont`) %>%
+  mutate(r.small.tum = `small.tumor`/`n.tum.nont`) %>%
+  mutate(r.large.str = `large.stroma`/`n.str.nont`) %>%
+  mutate(r.large.tum = `large.tumor`/`n.tum.nont`) %>%
+  mutate(r.small = n.small/(`n.str.nont`+`n.tum.nont`)) %>%
+  mutate(r.large = n.large/(`n.str.nont`+`n.tum.nont`)) %>%
+  mutate(r.str = (`small.stroma` + `large.stroma`)/`n.str.nont`) %>%
+  mutate(r.tum = (`small.tumor` + `large.tumor`)/`n.tum.nont`) %>%
+  mutate(r.nont.both = `n.endo.all`/(`n.str.nont`+`n.tum.nont`)) %>%
+  mutate(r.all.both = `n.endo.all`/n.all$n.all) %>%
+  select(-(1:10))
+
+cor0 <- cor(n.endo1,df.gs[,"TNFa/NFkB"],method="pearson",use="pairwise.complete.obs")
+
+```
+
+```{r}
+# cors <- c(cor500[c(1,3)],cor0)[c(1,3:4,2,5:7)]
+rownames(cor0) <- sub("^r.","",rownames(cor0))
+cors.df.cn <- cor0[c(1,3,7,2,4,8,10),,drop=F] %>%
+  as.data.frame() %>%
+  rename(PCC = V1) %>%
+  tibble::rownames_to_column("smpl") %>%
+  mutate(smpl = factor(smpl,levels=smpl)) %>%
+  mutate(cell_type = factor(c(rep(c("small","large","all"),times=2),"all"),levels=c("small","large","all"))) %>%
+  mutate(location = factor(sub(".+\\.","",smpl),levels=c("str","tum","both")))
+
+p <- ggplot(cors.df.cn,aes(x=smpl,y=PCC,fill=cell_type)) +
+  geom_bar(stat="identity",position="dodge") +
+  scale_fill_manual(values=brewer.pal(3,"Set1")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        legend.position="top") +
+  xlab("") +
+  ggtitle("NFkB activity and endo frequency (str is d > 500)")
+
+pdf(file.path(cycif_fig_dir,"ts_axis","endo","endo_size_loc and NFkB_v2.pdf"),width=5,height=7)
+print(p)
+dev.off()
+```
+

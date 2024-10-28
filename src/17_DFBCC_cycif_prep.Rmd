@@ -1,0 +1,408 @@
+---
+title: "APM_CyCIF_prep"
+author: "Kenichi Shimada"
+date: '2023-02-16'
+# output: 
+#   html_notebook: 
+#     toc: yes
+---
+
+# ERS-APM/TC CyCIF analysis
+
+## Initial setup ---------------------------
+
+### Install CycifAnalyzeR
+```{r reinstall_CycifAnalyzeR, eval=FALSE}
+# Install or update the CycifDataAnalysis package from GitHub
+# Uncomment the line below to install or update the package
+# devtools::install_github("kenichi-shimada/CycifDataAnalysis", force=TRUE)
+
+# Load CycifAnalyzeR package from a local directory
+devtools::load_all("/Users/kenichishimada/Dropbox (HMS)/_projects_/B00 CyCIF/CycifAnalyzeR")
+```
+
+### Load packages
+
+```{r load_packages,message=F,warning=F}
+# Suppress package startup messages for cleaner output
+suppressPackageStartupMessages({
+  library(MASS)         # For statistical functions
+  library(gplots)       # For various plotting tools
+  library(RColorBrewer) # For color palettes
+  library(mclust)       # For Gaussian mixture models and clustering
+  # library(largeVis)  # For high-dimensional data visualization
+  library(openxlsx)     # For Excel file operations
+  library(dplyr)        # For data manipulation
+  library(ggplot2)      # For data visualization
+  library(ggrepel)      # For non-overlapping text labels in ggplot2
+  library(heatmap3)     # For heatmap generation
+})
+```
+
+### Load quantification csv files into a `CycifStack` object
+```{r dir_path}
+if(0){
+  fns1 <- dir(path=quant_data_dir,pattern=".+cellRing\\.csv")[1:3]
+  cs1 <- CycifStack(fns1,path=quant_data_dir,mask_type="cellRing",mcmicro=FALSE)
+  saveRDS(cs1,file.path(cycif_obj_dir,"cs_073023.rds")) 
+}else{
+  cs1 <- readRDS(file.path(cycif_obj_dir,"cs_073023.rds"))  
+}
+
+```
+
+## set nCycles ---------------------------
+
+### Use up to 6th cycles
+```{r}
+# Define the number of cycles applicable to all samples and filter samples accordingly
+n.cycle <- 6
+smpls <- names(cs1)
+is.used.smpls <- nCycles(cs1) >= n.cycle # 29 samples
+
+cs1 <- cs1[is.used.smpls]
+nCycles(cs1) <- n.cycle
+```
+
+## Import ROIs from Omero ---------------------------
+### Prepare ROIs exported from OMERO
+```{r}
+# Define directory for ROIs and load them
+rois_dir <- "/Users/kenichishimada/Dropbox (HMS)/_projects_/B06 03 HR-APM/cycif/example/rois"
+fns <- dir(rois_dir, pattern="csv$")
+names(fns) <- sub("-.+$", "", fns)
+
+# Process and import ROIs, conditional logic included for demonstration
+# Specific implementation details omitted for brevity
+
+nm.fns <- names(fns)
+
+rois.out <- lapply(fns,function(fn){
+  tmp <- suppressWarnings(read.csv(file.path(rois_dir,fn)))
+  tmp <- tmp[tmp$type != "Ellipse",]
+})
+
+# Make sure rois.out and cs1 share the identical samples
+used.smpls <- intersect(names(rois.out),names(cs1))  
+rois.out <- rois.out[used.smpls]
+cs1 <- cs1[used.smpls]
+
+if(0){
+  ## << get df.gs2 from the bottom >>
+  ids <- df.gs2$id
+  names(ids) <- df.gs2$lspid
+  
+  is.used <- names(rois.out) %in% df.gs2$lspid
+  rois.out <- rois.out[is.used]
+  names(rois.out) <- as.character(ids[names(rois.out)])
+}  
+
+# batch import of ROIs to cs object
+cs1 <- importROIs(cs1,rois.out)
+
+if(0){
+  # per sample ROI import
+  for(smpl in c("15643","15658")){
+    cs1[[smpl]] <- importROIs(cs1[[smpl]],rois.out[[smpl]])
+  }
+}
+```
+
+### Fig : show imported ROIs in each image
+```{r}
+# Loop through samples and generate ROI images
+# This block contains example code for generating images; actual plotting code is not executed
+
+smpls <- names(cs1)
+
+for(smpl in smpls[-1]){
+  tmp <- cs1[[smpl]]
+  wr <- factor(as.numeric(tmp@within_rois)+1,labels=c("no","yes"))
+  uniq.cols <- c("grey80","red")
+  names(uniq.cols) <- levels(wr)
+  png(file.path(cycif_fig_dir,"prep_rois",paste0("rois_",smpl,".png")),width=700,height=700)
+  slidePlot(tmp,
+            plot_type="custom",
+            custom_labs=wr,
+            uniq.cols=uniq.cols,
+            ttl=paste0(smpl," (up to cycle 6)"),
+            ncells=1e4)
+  dev.off()
+}
+```
+
+## `dnaFilter` - remove lost/folded area ---------------------------
+
+Set a filter for each channel using each cycle's DNA staining. This has to be done outside R notebook (ie regular R file) and po    sitive ROI selection.
+
+```{r dnaFiltered_data,eval=F}
+smpls <- names(cs1)
+
+if(0){
+  cs2 <- lapply(smpls,function(smpl){
+     readRDS(file.path(cycif_obj_dir,"dna_filtered",paste0(smpl,".rds")))
+  })
+  
+  for(smpl in smpls){
+    cs1[[smpl]]@dna_thres <- cs2[[smpl]]@dna_thres
+  }
+}
+
+for(smpl in smpls){
+  cs1[[smpl]] <- dnaFilter(cs1[[smpl]],show.only=T) # if dna.thres is available, used_cells are computed.
+  # saveRDS(cs1[[smpl]],file.path(cycif_obj_dir,"dna_filtered",paste0(smpl,".rds")))
+}
+
+```
+
+### Fig: checking dnaFilter - # available cells on slides
+
+```{r available_cells_slide}
+# for(smpl in smpls){
+#   fn <- paste0("used_cells_",smpl,"_v1_082223.png")
+#   png(file.path(cycif_fig_dir,"pre_available_cells",fn),width=1500,height=1500)
+#   ttl1 <- paste0(smpl," (available cells)")
+#   plotAvailCellOnSlide(cs1[[smpl]],main=ttl1,mfrow=c(4,3),
+#                        legend.cex=4,cex.main=4,cex.title=4)
+#   dev.off()
+# }
+```
+
+### Fig : checking dnaFilter - # cells after each cycle 
+
+```{r fig_dnaFilter}
+for(smpl in smpls){
+  fn <- paste0("dnaFilter_",smpl,"_v2.pdf")
+  pdf(file.path(cycif_fig_dir,"prep_dna-filter",fn),width=7,height=7)
+  dnaFilter(cs1[[smpl]],show.only=T)
+  dev.off()
+}  
+```
+
+### Subsetting samples based on `nCycles` and `% available cells`
+
+```{r sub_setting_cells}
+## subsetting samples
+stats <- cyApply(cs1,statUsedCells)
+stats1 <- do.call(rbind,lapply(stats,function(st){
+  st <- round(st,2)
+  return(st)  
+}))
+
+colnames(stats1) <- paste0("Cycle",1:6)
+
+stats1 <- as.data.frame(stats1) %>% tibble::rownames_to_column("id")
+stats1
+```
+
+### Rename antibodies
+
+```{r}
+abs <- cs1@abs_list$ab
+abs <- sub("_.+","",abs)
+abs[abs=="GRANZYMEB"]<- "GrB"
+abs[abs=="HLADBP1"]<- "HLADPB1"
+cs1@abs_list$ab <- abs
+
+##
+for(smpl in smpls){
+  cs1[[smpl]]@abs_list$ab <- abs
+  names(cs1[[smpl]]@raw) <- abs
+}
+
+if(0){
+  saveRDS(abs,file.path(cycif_obj_dir,"gates","abs_101223.rds"))
+}
+```
+
+## Cell-type calling ---------------------------
+
+### Load cell-type definitions
+```{r load_cell_type_def}
+# ctype.file <- file.path(cycif_cycif_proj_dir,"cell-type-def","cell-type-definition_EribPem_v1.xlsx")
+ctype.file <- file.path(cycif_data_dir,"cell-type-state-definition_APMTC_v2.xlsx")
+ctype.sheets <- getSheetNames(ctype.file)
+ctype <- readWorkbook(ctype.file,sheet="cell lineage",colNames=TRUE,rowNames=FALSE)
+ctype[is.na(ctype)] <- ""
+cstate <- readWorkbook(ctype.file,sheet="cell state",colNames=TRUE,rowNames=TRUE)
+```
+
+### cell type hierarchy
+```{r}
+# this should be included in CellTypeSkeleton
+ctype.1 <- ctype[,names(ctype) %in% c("Parent","Child",abs_list(cs1)$ab)]
+# used.cts <- apply(as.matrix(ctype.1[,-c(1:2)]),1,function(x)any(x %in% c("AND","OR"))) |
+#                     grepl("unknown",ctype.1$Child) |
+#                     grepl("other",ctype.1$Child)
+# ctype.1 <- ctype.1[used.cts,]
+cstate.1 <-cstate[ctype.1$Child,names(cstate) %in% abs_list(cs1)$ab]
+
+##
+pdf(file.path(cycif_fig_dir,"prep_abs_summary","ab_graph_cyc6.pdf"),width=7,height=7)
+par(mar=c(0,0,3,0))
+ct.graph <- CellTypeGraph(ctype.1,plot=T,main='Cell type definition',with.hierarchy=TRUE)
+dev.off()
+
+```
+
+### Compile and load gates, `logTh_transformation`
+```{r}
+if(0){
+  source(file.path(cycif_src_dir,"compile_gates_101223.r"))
+}else{
+  gates <- readRDS(file.path(cycif_obj_dir,"gates","gates_101223.rds")) # 120122,122822,123122  
+}
+
+if(0){
+  ## to redo setGates
+  for(smpl in names(cs1)){
+    cs1[[smpl]]@abs_list <- cs1[[smpl]]@abs_list[1:2]
+  }
+}
+
+used.smpls <- intersect(names(cs1),sub("gates_","",names(gates)))
+cs1 <- setGates(cs1,gates,run_normalize=TRUE) # avoid overwrite
+
+getGates(cs1)
+```
+
+### Cell type composition - all cells
+
+```{r define cell types cs7} 
+cs1 <- defineCellTypes(cs1,ctype.1,cstate.1,ct_name="default",overwrite=TRUE)
+if(0){
+  for(smpl in c("15643","15658")){
+    cs1[[smpl]] <-  defineCellTypes(cs1[[smpl]],ctype.1,cstate.1,ct_name="default",overwrite=TRUE)
+  }
+}
+nms <- names(cs1)
+
+```
+
+## Normalizaiton: Log-transformation -----------------
+```{r}
+smpls <- names(cs1)
+for(smpl in names(cs1)){
+  cs1[[smpl]] <- normalize(cs1[[smpl]],method="log")
+}
+
+if(0){ # save before changing the sample names
+  saveRDS(cs1,file=file.path(cycif_obj_dir,"cs1_cts_original_ids_101223.rds"))  # 27 samples
+  saveRDS(cs1,file=file.path(cycif_obj_dir,"cs1_cts_without_ellipsoid_120723.rds"))  # 27 samples
+}else{
+  cs1 <- readRDS(file=file.path(cycif_obj_dir,"cs1_cts_original_ids_101223.rds"))  # 27 samples
+}
+```
+## slidePlot : checking the cell types on slides ---------------------------
+
+### define cell-type cols 
+
+```{r}
+
+```
+### all cell types
+
+```{r}
+for(smpl in smpls){
+  fn <- paste0(smpl,"_v2.png")
+  png(file.path(cycif_fig_dir,"cts_expression","slides","celltypes_all",fn),width=700,height=700)
+  slidePlot(cs1[[smpl]],plot_type="cell_type",ncells=1e5,uniq.cols=ct.cols)
+  dev.off()
+}
+```
+
+### individual cell types
+```{r}
+for(smpl in smpls[-1]){
+  d <- file.path(cycif_fig_dir,"cts_expression","slides","celltypes_individual",smpl)
+  dir.create(d)
+  for(ct in uniq.cts[1:14]){
+    uc <- "red"
+    names(uc) <- ct
+    
+    fn <- paste0(smpl,"_",ct,".png")
+    png(file.path(d,fn),width=1500,height=1500)
+    slidePlot(cs1[[smpl]],plot_type="cell_type",ncells=1e5,uniq.cols=uc)
+    dev.off()
+  }
+}
+
+```
+
+## Metadata - change Match sample names -----------------
+```{r}
+## BOT <-> LSP
+hrtme <- read.xlsx("/Users/kenichishimada/Dropbox (HMS)/_projects_/B06 03 HR-APM/cycif/example/data/CyCIF_HRTME_ANALYSISTRACKING.xlsx",1)
+
+lsp2bot <- hrtme[1:2] %>%
+  rename(lspid = `LSP.ID.#`) %>%
+  rename(bot = `BOT.#`) %>%
+  mutate(lspid = as.character(lspid)) %>%  
+  mutate(bot = as.character(bot)) %>%
+  arrange(lspid)
+  
+
+bot.cycif <- hrtme$`BOT.#`
+names(bot.cycif) <- hrtme$`LSP.ID.#`
+
+table(names(cs1) %in% names(bot.cycif)) ## all TRUE
+
+## BOT <-> TXN: ERS-APMTC scores
+df.gs <- readRDS("/Users/kenichishimada/Dropbox (HMS)/_projects_/B06 03 HR-APM/manuscript/Rdata/11_dfbcc_txn/df_pcs_mod_activity_v3.rds")
+df.gs1 <- df.gs %>%
+  arrange(desc(ERS)) %>%
+  dplyr::rename(id="new") %>%
+  mutate(bot=sub("BOT","",bot)) %>%
+  left_join(lsp2bot,by="bot") %>%
+  filter(lspid != "15631") %>%
+  arrange(lspid)
+
+df.gs1 <- df.gs1[c("id",names(df.gs1[-6]))]
+
+for(i in seq(nrow(df.gs1))){
+  cs1[[i]]@cell_types$default@sample_names[] <- df.gs1$id[i]
+}
+names(cs1) <- df.gs1$id
+pData(cs1) <- df.gs1
+
+o <- order(as.numeric(sub("df","",df.gs1$id)))
+cs1 <- cs1[o]
+
+names(names(cs1)) <- c()
+```
+
+```{r}
+## modify cell_state_marker table
+nms <- names(cs1)
+
+for(nm in nms){
+  x <- cs1[[nm]]
+  csts <- x@cell_types$default@cell_state_def[,c(1:2,4)] # 1:7 is the cell state markers (PD1 is duplicated)
+  csts <- csts %>%
+    mutate(PD1=c(NA,"CAN")[(rownames(csts) %in% c("T","CD8T","CD4T","CD4T_nonTreg","CD4T_Treg","T_other")) + 1]) %>%
+    mutate(across(everything(), ~dplyr::na_if(.x, ""))) %>%
+    tibble::rownames_to_column(var = "cell_types")
+  x@cell_types$default@cell_state_def <- csts 
+  cs1[[nm]] <- x
+}
+```
+
+```{r}
+df.gs1 <- pData(cs1) %>% arrange(as.numeric(sub("df","",id)))
+pData(cs1) <- df.gs1
+```
+
+### <<Save `cs1` - after identifying `cell types`>>
+```{r define cell types} 
+if(0){
+  # saveRDS(cs1,file=file.path(cycif_obj_dir,"cs1_cts_101223.rds"))  # 28 samples
+  # saveRDS(cs1,file=file.path(cycif_obj_dir,"cs1_cts_wo_ellipsoid_101223.rds"))  # 28 samples
+  saveRDS(cs1,file=file.path(cycif_obj_dir,"cs1_cts_102624.rds"))  # 28 samples
+  
+}else{
+  # cs0 <- readRDS(file=file.path(cycif_obj_dir,"cs1_cts_101223.rds"))
+  cs1 <- readRDS(file=file.path(cycif_obj_dir,"cs1_cts_102624.rds"))
+}
+```
+
+
