@@ -1,0 +1,362 @@
+---
+title: "10_scRNAseq_data_analysis"
+#output: html_document
+date: "2023-09-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Initial setup
+
+### Load libraries
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(Matrix)
+  library(data.table)
+  # library(heatmap3)
+  library(ggplot2)
+  library(ggrepel)
+  library(Seurat)
+  # library(RColorBrewer)
+  # # library(lme4)
+  # # library(qvalue)
+  # library(viridis)
+  # library(ROCR)
+  # library(GSVA)
+  library(fgsea)
+})
+```
+
+### Load module genes
+```{r}
+## whole tumor
+mods <- readRDS(file.path(obj_dir,"1-4_prep","module_genes_final_122923.rds"))
+names(mods) <- paste0(names(mods),"_whole")
+
+## cancer cell intrinsic
+cons.gns <- readRDS(file.path(obj_dir,"9_ccle","conserved_gns_v3.rds"))
+names(cons.gns) <- paste0(names(cons.gns),"_int")
+
+## intrinsic sub
+nfkb_sub_1 <- intersect(cons.gns$`TNFa/NFkB_int`,mods$`TNFa/NFkB_whole`)
+nfkb_sub_2 <- intersect(cons.gns$`TNFa/NFkB_int`,mods$`APM/TC_whole`)
+ifn_sub <- intersect(cons.gns$`IFN-I_int`,mods$`IFN-I_whole`)
+apm_sub <- intersect(cons.gns$`IFN-I_int`,mods$`APM/TC_whole`)
+
+msigdb <- readRDS("/Users/kenichishimada/Dropbox (HMS)/_projects_/B06 03 HR-APM/manuscript/Rdata/5_pathway_analysis/msigdb.rds")
+msigdb.1 <- c(mods,cons.gns,
+              list(NFkB_sub1 = nfkb_sub_1,
+                   NFkB_sub2 = nfkb_sub_2,
+                   IFN_sub = ifn_sub,
+                   APM_sub = apm_sub))
+
+# prefix <- sub("_.+","",names(msigdb))
+# table(prefix)
+```
+
+## Correlation between cancer cell frequency and transcriptome
+## Load txn data 
+```{r}
+wehi.sc <- readRDS(file.path(obj_dir,"10_visvader","visvader_seurat_all_subtypes_v3.rds"))
+dfbcc.sn <- readRDS(file=file.path(obj_dir,"15_dfbcc_snseq","seurat_harmony_v2.rds"))
+dfbcc.bulk <- readRDS(file.path(obj_dir,"11_dfbcc_txn","txn_32_hr_v3.rds"))
+```
+
+#### common genes
+```{r}
+if(0){
+  wehi.sc1 <- GetAssayData(wehi.sc)
+  gns1 <- rownames(wehi.sc1)
+  
+  dfbcc.sn1 <- GetAssayData(dfbcc.sn)
+  gns2 <- rownames(dfbcc.sn1)
+  gns3 <- rownames(dfbcc.bulk)
+  
+  all.syms <- unique(unlist(msigdb))
+  
+  # txn.gns <- intersect(intersect(gns1,gns2),gns3) # 14954 genes
+  txn.gns <- intersect(gns1,gns2) # 22171 genes 
+  
+  common.used.syms <- intersect(txn.gns,all.syms) # 15573 genes
+  saveRDS(common.used.syms,file=file.path(obj_dir,"16_dfbcc_combo","common.used.syms.rds"))
+}else{
+  common.used.syms <- readRDS(file=file.path(obj_dir,"16_dfbcc_combo","common.used.syms.rds"))
+}
+```
+
+## Filter out genes not expressed in cancer cells (WEHI, DFBCC)
+
+### WEHI (all samples)
+```{r}
+mat0 <- GetAssayData(wehi.sc)
+mat1 <- mat0[common.used.syms,]
+
+m.cts <- list()
+uniq.cts <- levels(wehi.sc$celltype_2)
+for(ct in uniq.cts){
+  cat(ct,"..\n")
+  is.ct <- wehi.sc$celltype_2 == ct
+  ct.smpls <- wehi.sc$orig.ident[is.ct]
+# Operate on the sparse matrix directly
+  mat2 <- mat1[, is.ct]  # Keep the matrix in sparse format (do not convert)
+  
+  # Compute the row-wise mean grouped by ct.smpls without converting to dense matrix
+  m.ct <- list()
+  for(smpl in unique(ct.smpls)){
+    cat(smpl," ")
+    tmp <- rowMeans(mat2[, ct.smpls == smpl, drop=FALSE])  # Compute row means on sparse matrix
+    m.ct[[smpl]] <- tmp
+  }
+  m.ct <- do.call(cbind, m.ct)
+  
+  if(ct == "Cancer"){
+    m.tum <- m.ct
+    saveRDS(m.tum,file=file.path(obj_dir,"16_dfbcc_combo","m.tum_wehi.rds"))
+  }
+  # Store the result for the current cell type
+  m.cts[[ct]] <- m.ct
+  cat("\n")
+}
+
+exp.gs <- sapply(m.cts,function(m){
+  rowMeans(m,na.rm=T)
+})
+
+ratio.tum <- apply(exp.gs,1,function(e){
+  e[1]/max(e,na.rm=T)
+})
+
+is.exp.by.tum <- ratio.tum > .05 # 12028 TRUE, 1654 FALSE/14033 TRUE, 1540 FALSE
+saveRDS(is.exp.by.tum,file=file.path(obj_dir,"16_dfbcc_combo","is_exp_by_tum_wehi.rds"))
+```
+
+### DFBCC data
+```{r}
+mat0 <- GetAssayData(dfbcc.sn)
+mat1 <- mat0[common.used.syms,]
+
+m.cts <- list()
+uniq.cts <- levels(dfbcc.sn$celltype_broad_v3)
+for(ct in uniq.cts){
+  cat(ct,"..\n")
+  is.ct <- dfbcc.sn$celltype_broad_v3 == ct
+  ct.smpls <- dfbcc.sn$sample[is.ct]
+# Operate on the sparse matrix directly
+  mat2 <- mat1[, is.ct]  # Keep the matrix in sparse format (do not convert)
+  
+  # Compute the row-wise mean grouped by ct.smpls without converting to dense matrix
+  m.ct <- list()
+  for(smpl in unique(ct.smpls)){
+    cat(smpl," ")
+    tmp <- rowMeans(mat2[, ct.smpls == smpl, drop=FALSE])  # Compute row means on sparse matrix
+    m.ct[[smpl]] <- tmp
+  }
+  m.ct <- do.call(cbind, m.ct)
+  if(ct == "Cancer"){
+    m.tum <- m.ct
+    saveRDS(m.tum,file=file.path(obj_dir,"16_dfbcc_combo","m.tum_dfbcc.rds"))
+  }
+  
+  # Store the result for the current cell type
+  m.cts[[ct]] <- m.ct
+}
+
+exp.gs <- sapply(m.cts,function(m){
+  rowMeans(m,na.rm=T)
+})
+
+ratio.tum <- apply(exp.gs,1,function(e){
+  e[1]/max(e,na.rm=T)
+})
+
+is.exp.by.tum <- ratio.tum > .15 # 12028 TRUE, 1654 FALSE
+saveRDS(is.exp.by.tum,file=file.path(obj_dir,"16_dfbcc_combo","is_exp_by_tum_dfbcc.rds"))
+```
+
+### assemble genes expressed in cancer cells
+```{r}
+common.used.syms <- readRDS(file=file.path(obj_dir,"16_dfbcc_combo","common.used.syms.rds"))
+is.exp.wehi <- readRDS(file=file.path(obj_dir,"16_dfbcc_combo","is_exp_by_tum_wehi.rds"))
+is.exp.dfbcc <- readRDS(file=file.path(obj_dir,"16_dfbcc_combo","is_exp_by_tum_dfbcc.rds"))
+
+is.exp.by.tum <- is.exp.wehi & is.exp.dfbcc
+common.syms <- common.used.syms[is.exp.by.tum] ## 14033 genes
+common.syms <- common.syms[!is.na(common.syms)]
+
+m.tum.wehi <- readRDS(file=file.path(obj_dir,"16_dfbcc_combo","m.tum_wehi.rds"))[common.syms,]
+m.tum.dfbcc <- readRDS(file=file.path(obj_dir,"16_dfbcc_combo","m.tum_dfbcc.rds"))[common.syms,]
+```
+
+## Correlation between gene expression and cancer cell frequency
+### WEHI (all samples, HR+ only)
+```{r}
+wehi.sc$subtype[is.na(wehi.sc$subtype)] <- "HR+"
+subtypes <- wehi.sc@meta.data[c("subtype","orig.ident")] %>% unique()
+is.hr <- subtypes %>% filter(subtype == "HR+") %>% pull(orig.ident) %>% as.character()
+
+## cell type frequency
+tab <- as.matrix(table(wehi.sc$celltype_2,wehi.sc$orig.ident))
+stat <- array(as.vector(tab),dim(tab),dimnames=dimnames(tab))
+nstat <- stat/colSums(stat)[col(stat)] 
+ccf.wehi <- nstat["Cancer",]
+
+cor.wehi.all <- cor(t(m.tum.wehi),ccf.wehi,method="pe")[,1]
+cor.wehi.hr <- cor(t(m.tum.wehi[,is.hr]),ccf.wehi[is.hr],method="pe")[,1]
+
+saveRDS(cor.wehi.all,file=file.path(obj_dir,"16_dfbcc_combo","cor_wehi_all.rds"))
+saveRDS(cor.wehi.hr,file=file.path(obj_dir,"16_dfbcc_combo","cor_wehi_hr.rds"))
+```
+### DFBCC (snRNA-seq)
+```{r}
+tab <- as.matrix(table(dfbcc.sn$celltype_broad_v3,dfbcc.sn$sample))
+stat <- array(as.vector(tab),dim(tab),dimnames=dimnames(tab))
+nstat <- stat/colSums(stat)[col(stat)] 
+
+ccf.dfbcc.sn <- nstat["Cancer",]
+cor.dfbcc.sn <- cor(t(m.tum.dfbcc),ccf.dfbcc.sn,method="pe")[,1]
+saveRDS(cor.dfbcc.sn,file=file.path(obj_dir,"16_dfbcc_combo","cor_dfbcc.sn.rds"))
+```
+
+### DFBCC (CyCIF)
+```{r}
+nsh <- readRDS(file=file.path(cycif_obj_dir,"nstat_cycif_042624.rds"))
+df.gs <- readRDS(file.path(obj_dir,"11_dfbcc_txn","df_pcs_mod_activity.rds"))
+bots <- sub("BOT","",df.gs$bot)
+names(bots) <- df.gs$new
+colnames(nsh) <- bots[colnames(nsh)]
+ccf.dfbcc.cy <- nsh["Cancer",]
+
+smpls <- colnames(m.tum.dfbcc)
+cor.dfbcc.cy <- cor(t(m.tum.dfbcc[,smpls]),ccf.dfbcc.cy[smpls],method="pe")[,1]
+saveRDS(cor.dfbcc.cy,file=file.path(obj_dir,"16_dfbcc_combo","cor_dfbcc.cy.rds"))
+```
+
+### DFBCC (bulk vs CyCIF)
+```{r}
+colnames(dfbcc.bulk) <- sub("BOT","",names(dfbcc.bulk))
+smpls <- colnames(m.tum.dfbcc)
+
+cor.dfbcc.bulk.cy <- cor(t(dfbcc.bulk[common.syms,smpls]),ccf.dfbcc.cy[smpls],method="pe")[,1]
+saveRDS(cor.dfbcc.bulk.cy,file=file.path(obj_dir,"16_dfbcc_combo","cor_dfbcc.bulk.cy.rds"))
+```
+
+## Summary - correlations
+```{r}
+cor.wehi.all <- readRDS(file=file.path(obj_dir,"16_dfbcc_combo","cor_wehi_all.rds"))
+cor.wehi.hr <- readRDS(file=file.path(obj_dir,"16_dfbcc_combo","cor_wehi_hr.rds"))
+cor.dfbcc.sn <- readRDS(file=file.path(obj_dir,"16_dfbcc_combo","cor_dfbcc.sn.rds"))
+cor.dfbcc.cy <- readRDS(file=file.path(obj_dir,"16_dfbcc_combo","cor_dfbcc.cy.rds"))
+cor.dfbcc.bulk.cy <- readRDS(file=file.path(obj_dir,"16_dfbcc_combo","cor_dfbcc.bulk.cy.rds"))
+cors <- list(
+  wehi.all = cor.wehi.all,
+  wehi.hr = cor.wehi.hr,
+  dfbcc.sn = cor.dfbcc.sn,
+  dfbcc.cy = cor.dfbcc.cy,
+  dfbcc.bulkcy = cor.dfbcc.bulk.cy  
+)
+```
+
+```{r}
+save(cors,file=file.path(obj_dir,"16_dfbcc_combo","cors_wehi_dfci_102824.rda"))
+```
+
+#### Pathway analysis - fgsea
+```{r}
+msigdb0 <- lapply(msigdb,function(x)intersect(x,common.syms))
+n <- sapply(msigdb0,length) 
+is.used <- n > 15 & n < 500# 5298
+msigdb.used <- msigdb0[is.used]
+
+msigdb0.1 <- lapply(msigdb.1,function(x)intersect(x,common.syms))
+n <- sapply(msigdb0.1,length) 
+is.used <- n > 3 & n < 500# 5298
+msigdb.used.1 <- msigdb0.1[is.used]
+
+fg <- list()
+for(nm in names(cors)){
+  cors1 <- sort(cors[[nm]],decreasing=F)
+  fg1 <- fgsea(pathways = msigdb.used,
+                    stats    = cors1,
+                    minSize  = 15,
+                    maxSize  = 500) %>%
+    mutate(slp = -log10(padj) * sign(ES))
+  fg1.1 <- fgsea(pathways = msigdb.used.1, 
+                    stats    = cors1,
+                    minSize  = 3,
+                    maxSize  = 500) %>%
+    mutate(slp = -log10(padj) * sign(ES))
+  fg[[nm]] <- rbind(fg1,fg1.1)
+}
+
+idx <- lapply(fg,function(x)x[[1]])
+is.tested <- idx[[1]] %in% idx[[2]]
+
+fg1 <- lapply(fg,function(x){
+  is.tested <- x[[1]] %in% fg[[2]][[1]]
+  return(x[is.tested,])
+})
+
+# save(fg1,file=file.path(obj_dir,"16_dfbcc_combo","fgsea_wehi_dfci_102824.rda"))
+```
+
+### [Fig 4F] plot fgsea results - cancer cell specific
+```{r}
+df.fg <- data.frame(
+  `WEHI` = fg1$wehi.all$slp,
+  `DF/BCC` = fg1$dfbcc.cy$slp,
+  pathway = fg1$wehi.all$pathway
+) %>%
+  # filter(!is.na(`WEHI`) & !is.na(`DF/BCC`)) %>%
+  mutate(type = rep(c(0,1,3,2,1,2,1,3,2,1),c(5294,1,1,1,1,1,1,1,1,1)))
+
+my.uniq.cols <- RColorBrewer::brewer.pal(3,"Set1")[c(2,1,3)]
+names(my.uniq.cols) <- c("whole tumor","intrinsic","sub_int")
+
+my.cols <- my.uniq.cols[c(1,3,2,1,2,1,3,2,1)]
+
+##
+pdf(file.path(fig_dir,"16_dfbcc_combo",paste0("fgsea_sc_vs_sn_tum-gns_042424.pdf")),width=7,height=7)
+par(mar=c(5,5,5,5))
+plot(df.fg[1:2],pch='.',type="n",asp=1,
+     main="Pathway associated with cancer cell frequency in two cohorts",
+     xlab="Pathway expression in cancer cells (WEHI)",
+     ylab="Pathway expression in cancer cells (DFCI)",     
+     xlim=c(-10,10),ylim=c(-10,10))
+abline(h=0,v=0)
+points(df.fg %>% filter(type==0) %>% select(1:2),pch=".",col="grey30")
+points(df.fg %>% filter(type!=0) %>% select(1:2),pch=20,col=my.cols)
+text(df.fg %>% filter(type != 0) %>% select(1:2),df.fg %>% filter(type != 0) %>% pull(pathway),col=1)
+legend("topright",legend=c("whole tumor","intrinsic","sub int"),pch=20,col=RColorBrewer::brewer.pal(3,"Set1")[c(2,1,3)],title="module type")
+par(xpd=T)
+text(par()$usr[2]+2,par()$usr[4],"More expressed\nin samples\nwith high\ncancer cell freq.",cex=.7,col=2)
+text(par()$usr[1]-2,par()$usr[3]-2,"More expressed\nin samples\nwith low\ncancer cell freq.",cex=.7,col=4)
+par(xpd=F)
+dev.off()
+```
+### [Fig S8D] plot fgsea results - bulk RNA-seq
+
+```{r}
+fg.bulk <- fg$dfbcc.bulkcy %>% 
+  mutate(type="bulk")
+fg.bulk.my <- fg.bulk %>% 
+  filter(rep(c(FALSE,TRUE),c(5294,9))) %>%
+  mutate(gene.kind=c("whole tumor","intrinsic","sub_int")[c(1,3,2,1,2,1,3,2,1)])
+
+p <- ggplot(fg.bulk,aes(x=type,y=slp)) +
+  geom_violin() +
+  geom_point(data=fg.bulk.my,aes(y=slp,col=gene.kind),pch=95,size=10) +
+  scale_color_manual(values = my.uniq.cols) +
+  geom_text_repel(data=fg.bulk.my,aes(label=pathway),size=3) +
+  xlab("") +
+  theme_minimal() +
+  ggtitle("Pathway analysis\n(5304 pathways)")
+
+pdf(file.path(fig_dir,"16_dfbcc_combo",paste0("fgsea_violin_bulk_042624.pdf")),width=3,height=7)
+print(p)
+dev.off()
+```
+
+
