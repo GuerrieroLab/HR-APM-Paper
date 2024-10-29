@@ -1,0 +1,121 @@
+---
+title: "10_scRNAseq_data_analysis"
+#output: html_document
+date: "2023-09-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Load libraries
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  # library(heatmap3)
+  # library(ggplot2)
+  # library(ggrepel)
+  library(Seurat)
+  # library(lme4)
+  # library(qvalue)
+  # library(viridis)
+  # library(RColorBrewer)
+  # library(ROCR)
+  # library(GSVA)
+  # library(fgsea)
+})
+```
+
+## Find cell type markers 
+
+### DF/BCC data
+```{r}
+wp <- readRDS(file=file.path(obj_dir,"15_dfbcc_snseq","seurat_harmony_v2.rds"))
+
+Idents(wp) <- "celltype_broad_v3"
+wp@meta.data$celltype_broad_v3 <- factor(wp@meta.data$celltype_broad_v3,
+                                       levels=c("Cancer","Fibro","Peri","Endo","Adipo","Mac","DC","Mast","T","NK","B","Plasma"))
+wp@meta.data$celltype_broad_v3 <- droplevels(wp@meta.data$celltype_broad_v3)
+wp <- subset(wp,celltype_broad_v3 %in% c("Cancer","Fibro","Peri","Endo","Adipo","Mac","DC","Mast","T","NK","B","Plasma"))
+markers.d <- FindAllMarkers(wp, only.pos = TRUE, min.pct = 0.1, logfc.threshold = 0.5)
+saveRDS(markers.d,file=file.path(obj_dir,"15_dfbcc_snseq","markers_all_dfci_102824.rds"))
+```
+
+### WEHI data
+```{r}
+wp <- readRDS(file.path(obj_dir,"10_visvader","visvader_seurat_all_subtypes_v3.rds"))
+
+Idents(wp) <- "celltype_2"
+# table(wp@meta.data$celltype_2)
+wp@meta.data$celltype_2 <- factor(wp@meta.data$celltype_2,
+                                levels=c("Cancer","Fibroblast","Pericyte","Endothelial","Mono_Mac","Dendritic","Mast","T","NK","B","Plasma"))
+wp@meta.data$celltype_2 <- droplevels(wp@meta.data$celltype_2)
+wp <- subset(wp, celltype_2 %in% c("Cancer","Fibroblast","Pericyte","Endothelial","Mono_Mac","Dendritic","Mast","T","NK","B","Plasma"))
+
+markers.w <- FindAllMarkers(wp, only.pos = TRUE, min.pct = 0.1, logfc.threshold = 0.5)
+
+saveRDS(markers.w,file=file.path(obj_dir,"markers_all_wehi_102824.rds"))
+```
+
+## Combine the markers from two datasets
+```{r}
+markers.d <- readRDS(file=file.path(obj_dir,"15_dfbcc_snseq","markers_all_dfci_102824.rds"))
+
+levels(markers.w$cluster) <- levels(markers.d$cluster)[-5]
+
+lst.w <- tapply(markers.w$gene,markers.w$cluster,identity)
+lst.d <- tapply(markers.d$gene,markers.d$cluster,identity)
+
+uniq.cts <- names(lst.d)
+
+lst12 <- list()
+for(ct in uniq.cts){
+  lst1 <-lst.w[[ct]]
+  lst2 <-lst.d[[ct]]
+  gns <- intersect(lst1,lst2)
+  lst12[[ct]] <- gns
+}
+lst12$Adipo <- lst.d$Adipo
+
+markers.wd <- list()
+for(ct in c(uniq.cts)){
+  lw <- markers.w %>% 
+    filter(cluster == ct) %>%
+    filter(gene %in% lst12[[ct]]) %>%
+    select(avg_log2FC,p_val_adj,cluster,gene) %>%
+    rename(avg_log2FC.d=avg_log2FC,p_val_adj.d=p_val_adj)
+  ld <- markers.d %>% 
+    filter(cluster == ct) %>%
+    filter(gene %in% lst12[[ct]]) %>%
+    select(avg_log2FC,p_val_adj,cluster,gene) %>%
+    rename(avg_log2FC.w=avg_log2FC,p_val_adj.w=p_val_adj)
+  
+  tmp <- ld %>% left_join(lw,by=c("gene","cluster"))
+  markers.wd[[ct]] <- tmp[c(3,4,1,2,5,6)]
+}
+ct <- "Adipo"
+ld <- markers.d %>% 
+  filter(cluster == ct) %>%
+  filter(gene %in% lst12[[ct]]) %>%
+  select(avg_log2FC,p_val_adj,cluster,gene) %>%
+  rename(avg_log2FC.w=avg_log2FC,p_val_adj.w=p_val_adj) %>%
+  select(cluster,gene,avg_log2FC.w,p_val_adj.w) %>%
+  mutate(avg_log2FC.d=NA,p_val_adj.d=0)
+markers.wd[[ct]] <- ld
+
+markers.wd <- do.call(rbind,markers.wd)
+
+##
+saveRDS(markers.wd,file=file.path(obj_dir,"15_dfbcc_snseq","markers_all_wehi_dfci_102824.rds"))
+
+##
+th <- 1e-10
+m1 <- markers.wd %>%
+  filter(p_val_adj.d < th & p_val_adj.w < th)
+table(table(m1$gene))
+table(m1$cluster)
+
+lst.wd <- tapply(m1$gene,m1$cluster,identity)
+saveRDS(lst.wd,file=file.path(obj_dir,"15_dfbcc_snseq","list_biomarkers_102824.rds"))
+```
+
+

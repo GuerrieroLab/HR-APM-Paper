@@ -1,0 +1,957 @@
+---
+title: "11_ACOSOG_prep.Rmd"
+# output: html_notebook
+---
+
+## Initial setting
+### Load libraries
+```{r}
+suppressPackageStartupMessages({
+  library(GEOquery)
+  # library(limma)
+  library(ggrepel)
+  library(RColorBrewer)
+  library(dplyr)
+  library(GSVA)
+  library(impute)
+  library(tidyr)
+  library(heatmap3)
+})
+```
+
+### Set path
+```{r}
+fig_dir1 <- file.path(fig_dir,"8_acosog_cohorts","v2")
+```
+
+### Load data
+#### txn data - from GEO and gene modules
+```{r}
+Sys.setenv("VROOM_CONNECTION_SIZE" = 131072 * 5)
+gset <- getGEO("GSE87411", GSEMatrix = TRUE, AnnotGPL=FALSE)
+if (length(gset) > 1) idx <- grep("GPL6480", attr(gset, "names")) else idx <- 1
+
+gset <- gset[[idx]]
+```
+
+#### module genes (`mods`)
+```{r}
+mods <- readRDS(file=file.path(obj_dir,"1-4_prep","module_genes_final_122923.rds"))
+```
+
+### DE analysis functions
+```{r}
+# Create function for gene categorization
+DE_category <- function(x,gs){
+  x$DE_genes <- "others"
+  for(i in seq(gs)){
+    nm <- names(gs)[i]
+    gs1 <- gs[[i]]
+    # x$DE_genes[x$adj.P.Val < 0.05 &  x$GENE_SYMBOL %in% gs1] <- nm
+    x$DE_genes[x$GENE_SYMBOL %in% gs1] <- nm    
+  }
+  x$DE_genes <- factor(x$DE_genes,levels=c(names(gs),"others"))
+  return(x)
+}
+
+#Create plotting function
+volcano_plot<- function(df,p.thres=1e-5){
+  ## set my colors
+  # bl <- colorRampPalette(c(brewer.pal(3,"Dark2")[3],"white"))(4)
+  # bl <- colorRampPalette(c("white","steelblue"))(6)[5]
+  bl <- "steelblue"
+  mycols <- c(bl,brewer.pal(3,"Dark2"),"grey80")
+  names(mycols) <- c(names(mods),"others")
+
+  df <- df %>%
+    mutate(text=ifelse((adj.P.value < p.thres & Gene_category != "others") | 
+                         (GENE_SYMBOL %in% c("ESR1","CD8A","HLA-A")),GENE_SYMBOL,""))
+  p <- ggplot(df %>% arrange(desc(Gene_category)),
+              aes(x=logFC,y=-log10(adj.P.value),label=text)) +
+    geom_point(aes(color=Gene_category,size=Gene_category)) +
+    geom_hline(yintercept=-log10(0.05),color="grey60") +
+    scale_color_manual(values=mycols) +
+    scale_size_manual(values=c(1.5,1.5,1.5,1.5,.5)) +
+    geom_text_repel(max.overlaps=Inf,size=2) +
+    theme_minimal() 
+  return(p)
+}
+```
+
+## Update metadata
+### Add TimePoints
+```{r}
+# Time points to measure transcriptome
+pd.need <- pData(gset) %>% 
+  mutate(time_point = factor(as.character(rep(0:1,times=109)),labels=c("Pre","Post"))) %>%
+  dplyr::select(`studynum:ch2`,title,time_point,`bl  ki67:ch2`,`eot ki67:ch2`,`endocrine therapy response group:ch2`,`treatment course:ch2`) %>%
+  tibble::rownames_to_column("id")  
+names(pd.need) <- c("id","patient","title","time_point","bl_ki67","eot_ki67","response_group","treatment_course")
+
+pd.need1 <- pd.need %>%
+  mutate(time_point=factor(time_point,levels=c("Pre","Post"))) %>%
+  mutate(response_group=factor(response_group,levels=c("resistant","sensitive"))) %>%
+  mutate(bl_ki67=ifelse(bl_ki67=="60-70%","65%",bl_ki67)) %>%
+  mutate(bl_ki67=as.numeric(sub("~?([\\.0-9]+)%?","\\1",bl_ki67))) %>%
+  mutate(eot_ki67=ifelse(eot_ki67=="<1%","0.5%",eot_ki67)) %>%
+  mutate(eot_ki67=ifelse(eot_ki67==">90%","95%",eot_ki67)) %>%  
+  mutate(eot_ki67=as.numeric(sub("[~]?([\\.0-9]+)%?","\\1",eot_ki67))) %>%
+  filter(!is.na(bl_ki67) & !is.na(eot_ki67)) %>%
+  mutate(patient = factor(patient))
+
+```
+
+### Refine `response_group`
+```{r}
+pd.need1 <- pd.need1 %>% 
+  mutate(ratio = eot_ki67/bl_ki67) %>%
+  mutate(diff = eot_ki67 - bl_ki67) %>%
+  filter(!is.na(ratio) & !is.na(diff))
+
+# n <- sum(pd.need1$diff > 0)
+n <- sum(pd.need1$ratio > 1)
+pos.th <- sort(pd.need1$ratio,decreasing=T)[n]
+neg.th <- sort(pd.need1$ratio,decreasing=F)[n]
+
+pos <- (pd.need1 %>% filter(ratio >= pos.th))$id
+neg <- (pd.need1 %>% filter(ratio <= neg.th))$id
+
+labs <- c("sensitive","intermediate","resistant")[(pd.need1$ratio >= pos.th) + (pd.need1$ratio > neg.th) + 1]
+
+pd.need1 <- pd.need1 %>%
+  mutate(my_response1 = factor(labs,levels=c("sensitive","intermediate","resistant")))
+rownames(pd.need1) <- pd.need1$id
+
+pData(gset) <- pd.need1
+```
+
+#### [not-used] plot - Ki-67 status pre and post
+```{r}
+ptcols <- c(brewer.pal(3,"Set1"),"grey80")[c(1,4,2)]
+names(ptcols) <- levels(pd.need$my_response1)
+
+p <- pd.need1 %>% 
+  arrange(desc(my_response1)) %>%
+  ggplot(aes(x=bl_ki67,y=eot_ki67,color=my_response1,size=my_response1)) +
+  theme_minimal() +
+  geom_vline(xintercept=0) +  
+  geom_hline(yintercept=0) +
+  geom_abline(slope=1,intercept=0) +  
+  # geom_abline(slope=1,intercept=pos.th,linetype="dashed") +
+  # geom_abline(slope=1,intercept=neg.th,linetype="dashed") +
+  geom_abline(slope=neg.th,intercept=0,linetype="dashed") +  
+  
+  geom_point() +
+  scale_color_manual(values=ptcols) +
+  scale_size_manual(values=c(1.5,0.5,1.5)) + 
+  ggtitle("Ki67 positive tumors (%) at Pre- and Post-tx") +
+  xlab("Baseline") +
+  ylab("End of treatment")
+
+pdf(file=file.path(fig_dir,"8_acosog_cohorts","ACSOG_scatter_baseline.pdf"),width=7,height=7)
+print(p)
+dev.off()
+```
+
+## ssgsea analysis 
+```{r}
+ex <- exprs(gset)
+sn <- pd.need1$id
+ex <- ex[,sn]
+# identical(rownames(ex),fData(gset)$ID) # TRUE
+```
+
+### impute missing values
+```{r}
+syms <- fData(gset)$GENE_SYMBOL
+rownames(ex) <- syms
+
+not.na <- apply(ex,1,function(x)sum(is.na(x))/length(x) < .1)
+exist.syms <- syms[not.na]
+
+mods.0 <- lapply(mods,function(x)x[x %in% exist.syms])
+sapply(mods.0,length)
+mods.1 <- lapply(mods,function(x)x[!x %in% exist.syms]) 
+sapply(mods.0,length)
+
+ex1 <- ex[not.na,]
+
+sum(is.na(ex))/prod(dim(ex)) # 6% missing...
+ex1 <- impute.knn(ex1,k=10)
+ex1 <- ex1$data
+```
+
+### PCA & change of Ki67
+```{r}
+pca <- prcomp(t(ex1))
+
+## difference in Ki67 
+ki67 <- rep(NA,nrow(pd.need1))
+ki67[pd.need1$time_point == "Pre"] <- pd.need1$bl_ki67[pd.need1$time_point == "Pre"]
+ki67[pd.need1$time_point == "Post"] <- pd.need1$eot_ki67[pd.need1$time_point == "Post"]
+
+d.ki67 <- pd.need1 %>% filter(time_point =="Post") %>% pull(eot_ki67) - 
+  pd.need1 %>% filter(time_point =="Post") %>% pull(bl_ki67)
+
+pd.need1 <- pd.need1[1:11] %>%
+  cbind(pca$x[,1:2]) %>%
+  mutate(ki67=ki67) %>%
+  mutate(d.ki67 = rep(d.ki67,each=2))
+
+if(0){
+  cols <- (as.numeric(pd.need1$my_response1) + c(as.numeric(pd.need1$time_point)-1)*3)
+  plot(pca$x[,1],pca$x[,2],col=brewer.pal(6,"Paired")[cols],pch=19)
+
+  ## the trend was not too strong.
+  ggplot(pd.need1,aes(x=PC1,y=PC2,color=my_response1,shape=time_point)) + 
+    geom_point() +
+    geom_line(aes(group=patient)) +
+    theme_minimal()
+  
+  ggplot(pd.need1,aes(x=PC1,y=PC2,color=d.ki67,shape=time_point)) + 
+    geom_point() +
+    geom_line(aes(group=patient)) +
+    scale_color_gradient2(low="blue",mid="black",high="red",midpoint=0) +
+    theme_minimal()
+}
+```
+
+### ssGSEA, 4 modules
+```{r}
+syms1 <- rownames(ex1)
+mods1 <- lapply(mods,function(x)x[x %in% syms1])
+sapply(mods1,length)
+
+system.time({
+  ssgsea.par <- ssgseaParam(expr = ex1, geneSets = mods1, minSize = 10, maxSize = 500, normalize=FALSE)
+  scores <- gsva(ssgsea.par)
+  scores <- t(scores)
+})
+
+scores <- scores %>% as.data.frame() %>% tibble::rownames_to_column("id")
+pd.need1 <- pd.need1[1:15] %>% left_join(scores,by="id")
+
+d.exp <- pd.need1 %>% 
+  dplyr::select(patient,time_point,!!!syms(names(scores)[-1]))
+
+d.exp1 <- (d.exp %>% filter(time_point =="Post") %>% dplyr::select(-(1:2)) -
+  d.exp %>% filter(time_point =="Pre") %>% dplyr::select(-(1:2))) %>%
+  cbind(d.exp %>% filter(time_point =="Pre") %>% dplyr::select(1))
+names(d.exp1)[1:4] <- paste0("d.",names(d.exp1)[1:4])
+# d.exp1$d.ERS[d.exp1$d.ERS < -3000] <- -3000
+# d.exp1$d.ERS[d.exp1$d.ERS > 3000] <- 3000
+
+pd.need2 <- pd.need1 %>% left_join(d.exp1,by="patient")
+```
+
+### [Fig. 7A] comparison between ERS_Pre and d.ERS
+```{r}
+ers <- pd.need2 %>% 
+  select(patient,time_point,`ERS`) %>%
+  spread(time_point,`ERS`) %>%
+  mutate(diff=Post-Pre)
+sp <- round(cor(ers$Pre,ers$diff,method="sp"),2)
+p <- ggplot(ers,aes(x=Pre,y=diff)) +
+  geom_point(color="grey20") +
+  ggtitle(paste0("ERS (SCC:",sp,")")) +
+  xlab("ERS exprs. at Pre-tx") +
+  ylab("d.ERS") +
+  theme_minimal()
+
+pdf(file=file.path(fig_dir1,"ERS_pre_post.pdf"),width=7,height=7)
+print(p)
+dev.off()
+
+```
+
+
+```{r}
+if(0){
+  p <- pd.need2 %>% 
+    select(patient,time_point,`TNFa/NFkB`) %>%
+    spread(time_point,`TNFa/NFkB`) %>%
+    mutate(diff=Post-Pre) %>%
+    ggplot(aes(x=Pre,y=diff)) +
+    geom_point() +
+    ggtitle(paste0("TNFa/NFkB (SCC:",sp,")")) +
+    xlab("TNFa/NFkB exprs. at Pre-tx") +
+    ylab("∆TNFa/NFkB") +
+    theme_minimal()
+  
+  p <- pd.need2 %>% 
+    select(patient,time_point,`IFN-I`) %>%
+    spread(time_point,`IFN-I`) %>%
+    mutate(diff=Post-Pre) %>%
+    ggplot(aes(x=Pre,y=diff)) +
+    geom_point() +
+    ggtitle(paste0("IFN-I (SCC:",sp,")")) +
+    xlab("IFN-I exprs. at Pre-tx") +
+    ylab("∆IFN-I") +
+    theme_minimal()
+  
+  p <- pd.need2 %>% 
+    select(patient,time_point,`APM/TC`) %>%
+    spread(time_point,`APM/TC`) %>%
+    mutate(diff=Post-Pre) %>%
+    select(Pre,diff) %>%
+    cor(.,method="spearman")
+    ggplot(aes(x=Pre,y=Post)) +
+    geom_point() +
+    ggtitle(paste0("APM/TC (SCC:",sp,")")) +
+    xlab("APM/TC exprs. at Pre-tx") +
+    ylab("∆APM/TC") +
+    theme_minimal()
+}
+```
+
+## Module expression changes
+### [Fig 7A] Violin plots
+```{r}
+pval <- t.test(pd.need2 %>% filter(time_point == "Pre") %>% pull(ERS),
+       pd.need2 %>% filter(time_point == "Post") %>% pull(ERS),
+       paired=T)$p.value
+tmp <- data.frame(x=1.5,y=max(pd.need2$ERS),label=paste0("p=",signif(pval,3)))
+p <- ggplot(pd.need2,aes(x=time_point,y=ERS)) +
+  geom_violin() +#fill="grey80") +
+  geom_text(data=tmp,aes(x=x,y=y,label=label)) +
+  geom_line(aes(group=patient,color=d.ERS),linewidth=.1) +
+  scale_color_gradient2(low="blue",mid="black",high="red",midpoint=0) +
+  ylab("module scores") +
+  ggtitle("ERS") +
+  theme_minimal()
+pdf(file=file.path(fig_dir1,"ERS_pre_post.pdf"),width=4,height=7)
+print(p)
+dev.off()
+
+  ## TNFa/NFkB
+pval <- t.test(pd.need2 %>% filter(time_point == "Pre") %>% pull(`TNFa/NFkB`),
+       pd.need2 %>% filter(time_point == "Post") %>% pull(`TNFa/NFkB`),
+       paired=T)$p.value
+tmp <- data.frame(x=1.5,y=max(pd.need2$`TNFa/NFkB`),label=paste0("p=",signif(pval,3)))
+p <- ggplot(pd.need2,aes(x=time_point,y=`TNFa/NFkB`)) +
+  geom_violin() +#fill="grey80") +
+  geom_text(data=tmp,aes(x=x,y=y,label=label)) +
+  geom_line(aes(group=patient,color=`d.TNFa/NFkB`),linewidth=.1) +
+  scale_color_gradient2(low="blue",mid="black",high="red",midpoint=0) +
+  ylab("module scores") +
+  ggtitle("TNFa/NFkB") +
+  theme_minimal()
+pdf(file=file.path(fig_dir1,"NFkB_pre_post.pdf"),width=4,height=7)
+print(p)
+dev.off()
+
+## APM/TC
+pval <- t.test(pd.need2 %>% filter(time_point == "Pre") %>% pull(`APM/TC`),
+       pd.need2 %>% filter(time_point == "Post") %>% pull(`APM/TC`),
+       paired=T)$p.value
+tmp <- data.frame(x=1.5,y=max(pd.need2$`APM/TC`),label=paste0("p=",signif(pval,3)))
+p <- ggplot(pd.need2,aes(x=time_point,y=`APM/TC`)) +
+  geom_violin() +#fill="grey80") +
+  geom_text(data=tmp,aes(x=x,y=y,label=label)) +
+  geom_line(aes(group=patient,color=`d.APM/TC`),linewidth=.1) +
+  scale_color_gradient2(low="blue",mid="black",high="red",midpoint=0) +
+  ylab("module scores") +
+  ggtitle("APM/TC") +
+  theme_minimal()
+pdf(file=file.path(fig_dir1,"APMTC_pre_post.pdf"),width=4,height=7)
+print(p)
+dev.off()
+
+## IFN-I
+pval <- t.test(pd.need2 %>% filter(time_point == "Pre") %>% pull(`IFN-I`),
+       pd.need2 %>% filter(time_point == "Post") %>% pull(`IFN-I`),
+       paired=T)$p.value
+tmp <- data.frame(x=1.5,y=max(pd.need2$`IFN-I`),label=paste0("p=",signif(pval,3)))
+
+p <- ggplot(pd.need2,aes(x=time_point,y=`IFN-I`)) +
+  geom_violin() +#fill="grey80") +
+  geom_text(data=tmp,aes(x=x,y=y,label=label)) +
+  geom_line(aes(group=patient,color=`d.IFN-I`),linewidth=.1) +
+  scale_color_gradient2(low="blue",mid="black",high="red",midpoint=0) +
+  ylab("module scores") +
+  ggtitle("IFN-I") +
+  theme_minimal()
+pdf(file=file.path(fig_dir1,"IFN_pre_post.pdf"),width=4,height=7)
+print(p)
+dev.off()
+```
+
+### [Fig. 7A] d.ERS vs d.Ki67
+```{r}
+pcc <- cor(pd.need2$`d.ERS`,pd.need2$`d.ki67`,method="pearson")
+scc <- cor(pd.need2$`d.ERS`,pd.need2$`d.ki67`,method="spearman")
+
+p <- ggplot(pd.need2,aes(x=d.ERS,y=d.ki67)) +
+    geom_hline(yintercept=0) +
+    geom_vline(xintercept=0) +
+    geom_point(color="grey20") +
+    ggtitle(paste0("Changes in ERS and Ki67\n(pcc=",signif(pcc,2),",scc=",signif(scc,2),")")) +
+    theme_minimal()
+
+pdf(file=file.path(fig_dir1,"ERS_ki67.pdf"),width=4,height=4)
+print(p)
+dev.off()
+
+if(0){
+  ggplot(pd.need1,aes(x=PC1,y=PC2,color=ERS,shape=time_point)) + 
+    geom_point() +
+    # geom_line(aes(group=patient)) +
+    theme_minimal()
+  
+  ggplot(pd.need1,aes(x=PC1,y=PC2,color=`TNFa/NFkB`,shape=time_point)) + 
+    geom_point() +
+    # geom_line(aes(group=patient)) +
+    theme_minimal()
+  
+  ggplot(pd.need1,aes(x=PC1,y=PC2,color=`APM/TC`,shape=time_point)) + 
+    geom_point() +
+    # geom_line(aes(group=patient)) +
+    theme_minimal()
+}
+
+p <- ggplot(pd.need2,aes(x=d.ERS,y=`d.APM/TC`)) +#,color=`ki67`,shape=time_point)) + 
+  geom_point() +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0) +
+  geom_smooth(method="lm",se=T) +
+  theme_minimal()
+
+ggplot(pd.need2,aes(x=d.ERS,y=`d.TNFa/NFkB`)) +#,color=`ki67`,shape=time_point)) + 
+  geom_point() +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0) +
+  geom_smooth(method="lm",se=T) +
+  theme_minimal()
+
+ggplot(pd.need2,aes(x=d.ERS,y=`d.IFN-I`)) +#,color=`ki67`,shape=time_point)) + 
+  geom_point() +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0) +
+  geom_smooth(method="lm",se=T) +
+  theme_minimal()
+```
+
+```{r}
+if(0){
+  d.pd <- pd.need2 %>% 
+    filter(time_point == "Pre") %>%
+    dplyr::select(patient,time_point,14:23)
+  # ERS,`TNFa/NFkB`,`APM/TC`,`IFN-I`,
+  #                 d.ERS,`d.TNFa/NFkB`,`d.APM/TC`,`d.IFN-I`,d.ki67,bl_ki67,eot_ki67)
+  d.pd$d.ERS[d.pd$d.ERS < -3000] <- -3000
+  d.pd$d.ERS[d.pd$d.ERS > 3000] <- 3000
+  
+  heatmap3(cor(d.pd %>% dplyr::select(-patient,-time_point),method="sp"),
+           scale="none",balanceColor=TRUE,margins=c(10,10))
+  
+  lm1 <- lm(`d.APM/TC` ~ `d.IFN-I` + `d.ERS` + `d.TNFa/NFkB`,data=d.pd)
+  
+  ggplot(d.pd,aes(x=`IFN-I`,y=`d.APM/TC`,color=d.ERS)) +
+    geom_point(alpha=0.5) + 
+    scale_color_gradient2(low="blue",mid="black",high="red",midpoint=0) +
+    geom_line(aes(group=patient)) +
+    theme_minimal()
+  
+  ggplot(d.pd,aes(x=bl_ki67,y=eot_ki67,color=d.ERS)) +
+    geom_point(alpha=0.5) + 
+    scale_color_gradient2(low="blue",mid="black",high="red",midpoint=0) +
+    geom_line(aes(group=patient)) +
+    theme_minimal()
+  
+  ggplot(d.pd,aes(x=bl_ki67,y=eot_ki67,color=d.ERS)) +
+    geom_point(alpha=0.5) + 
+    scale_color_gradient2(low="blue",mid="black",high="red",midpoint=0) +
+    geom_line(aes(group=patient)) +
+    theme_minimal()
+}
+```
+
+
+### [Fig 7BC] correlation
+```{r}
+pre <- cor(pd.need2 %>% filter(time_point == "Pre") %>% dplyr::select(16:19),method="sp")
+pdf(file=file.path(fig_dir1,"spp_cors_pre.pdf"),width=7,height=7)
+heatmap3(pre,
+         scale="none",balanceColor=T,main="Pre",margins=c(10,10))
+dev.off()
+write.csv(round(pre,3),file=file.path(fig_dir1,"spp_cors_pre.csv"))
+
+##
+changes <- cor(pd.need2 %>% filter(time_point == "Post") %>% dplyr::select(20:23),method="sp")
+pdf(file=file.path(fig_dir1,"spp_cors_change.pdf"),width=7,height=7)
+heatmap3(changes,
+                  scale="none",balanceColor=T,main="change",margins=c(10,10))
+dev.off()
+write.csv(round(changes,3),file=file.path(fig_dir1,"spp_cors_change.csv"))
+
+##
+pre.post <- cor(pd.need2 %>% filter(time_point == "Pre") %>% dplyr::select(16:19),
+                    pd.need2 %>% filter(time_point == "Pre") %>% dplyr::select(c(20:23)),method="sp")
+heat.cols <- colorRampPalette(c("navy", "white", "firebrick3"))(201)
+names(heat.cols) <- -100:100
+n <- round(max(abs(range(pre.post)))*100)
+
+heat.cols <- heat.cols[as.character(seq(-n,n))]
+
+## 
+pdf(file=file.path(fig_dir1,"spp_cors_pre_post.pdf"),width=7,height=7)
+heatmap3(pre.post,margins=c(10,10),col=heat.cols,
+    Colv=NA,Rowv=NA,
+    scale="none",balanceColor=T,main="correlation between initial state and the change")
+dev.off()
+write.csv(round(pre.post,3),file=file.path(fig_dir1,"spp_cors_pre_post.csv"))
+# "#7FC97F" "#FDC086" "#BEAED4"
+```
+### [Fig 7D] linear regression
+```{r}
+pd.need2.lm <- pd.need2 %>% filter(time_point == "Pre") %>%
+  mutate(`APM/TC` = scale(`APM/TC`)) %>%
+  mutate(`IFN-I` = scale(`IFN-I`)) %>%
+  mutate(`TNFa/NFkB` = scale(`TNFa/NFkB`)) %>%
+  mutate(`d.IFN-I` = scale(`d.IFN-I`)) %>%
+  mutate(`d.TNFa/NFkB` = scale(`d.TNFa/NFkB`)) %>%
+  mutate(`d.APM/TC` = scale(`d.APM/TC`))
+
+lm1 <- lm(`d.APM/TC` ~ `APM/TC` + `IFN-I` + `TNFa/NFkB` + `d.IFN-I` + `d.TNFa/NFkB`,
+          data=pd.need2.lm)
+nlps <- sort(-log10(summary(lm1)$coef[-1,4]))
+lm.coefs <- summary(lm1)$coef[-1,1]
+
+pdf(file=file.path(fig_dir1,"lm_nlps_dAPMTC.pdf"),width=7,height=4)
+par(mar=c(5,10,4,1))
+barplot(nlps,las=1,horiz=T,xlab="-log10(p-value)",main="significance of the coefficients")
+abline(v=-log10(0.05),lty=2)
+dev.off()
+
+pdf(file=file.path(fig_dir1,"lm_coef_dAPMTC.pdf"),width=7,height=4)
+par(mar=c(5,10,4,1))
+barplot(lm.coefs[names(nlps)],las=1,horiz=T,xlab="coefficient",main="contribution of the coefficients")
+abline(v=0)
+dev.off()
+
+
+```
+
+## cell type deconv
+
+### biomarkers for different cell types
+```{r}
+markers.wd <- readRDS(file=file.path(obj_dir,"15_dfbcc_snseq","markers_all_wehi_dfci_102824.rds"))
+
+th <- 1e-100
+m1 <- markers.wd %>%
+  filter(p_val_adj.d < th & p_val_adj.w < th)
+uniq.gns <- names(which(table(m1$gene)<3))
+m1 <- m1 %>% filter(gene %in% uniq.gns)
+
+syms1 <- rownames(ex1)
+lst.wd <- tapply(m1$gene,m1$cluster,function(x){
+  # x <- x[x %in% syms1 & !x %in% unlist(mods)]
+  x <- x[x %in% syms1]
+  n <- min(length(x),100)
+  # n <- length(x)
+  return(x[seq(n)])
+})
+lst.wd <- lapply(lst.wd,function(x)x)
+sapply(lst.wd,length)
+
+sapply(lst.wd,function(x)length(intersect(x,unlist(mods))))
+```
+### ssgsea to compute relativea abundance
+```{r}
+system.time({
+  # ssgsea.par <- ssgseaParam(expr = ex[,1:5], geneSets = mods, minSize = 10, maxSize = 500)
+  ssgsea.par <- ssgseaParam(expr = ex1, geneSets = lst.wd, minSize = 10, maxSize = 1000, normalize=FALSE)
+  scores <- gsva(ssgsea.par)
+  scores <- t(scores)
+})
+colnames(scores)[1] <- "Tumor"
+pd.need3 <- pd.need2 %>% cbind(scores)
+pd.need3pre <- pd.need3 %>% filter(time_point == "Pre")
+
+pe <- cor(pd.need3pre[16:19],pd.need3pre[24:35],method="pearson")
+sp <- cor(pd.need3pre[16:19],pd.need3pre[24:35],method="spearman")
+
+sort(pe["TNFa/NFkB",],dec=T)
+sort(sp["TNFa/NFkB",],dec=T)
+
+sort(pe["IFN-I",],dec=T)
+sort(sp["IFN-I",],dec=T)
+
+
+d.scores <- scores[rep(1:2,times=107)==2,] - scores[rep(1:2,times=107)==1,]
+colnames(d.scores) <- paste0("d.",colnames(scores))
+
+d.pe <- cor(pd.need3 %>% filter(time_point == "Pre") %>% dplyr::select(20:23),d.scores,method="pearson")
+d.sp <- cor(pd.need3 %>% filter(time_point == "Pre") %>% dplyr::select(20:23),d.scores,method="spearman")
+
+sort(d.pe["d.TNFa/NFkB",],dec=T)
+sort(d.sp["d.TNFa/NFkB",],dec=T)
+
+plot(pe["TNFa/NFkB",],sp["TNFa/NFkB",])
+plot(d.pe["d.TNFa/NFkB",],d.sp["d.TNFa/NFkB",])
+
+sp.te <- cor(pd.need3pre$`TNFa/NFkB`,pd.need3pre$Endo,method="spearman")
+d.sp.te <- cor((pd.need3 %>% filter(time_point=="Pre"))$`d.TNFa/NFkB`,d.scores[,"d.Endo"],method="spearman")
+```
+
+
+```{r}
+pdf(file=file.path(fig_dir1,"spp_nfkb_endo_pre_v2.pdf"),width=7,height=7)
+par(mar=c(5,5,3,3))
+plot(pd.need3pre$`TNFa/NFkB`,pd.need3pre$Endo,
+     xlab="TNFa/NFkB",ylab="Endo",pch=20,col="grey60",
+     main=paste0("correlation between TNFa/NFkB and Endo\n(spearman=",signif(sp.te,3),")"))
+dev.off()
+##
+pdf(file=file.path(fig_dir1,"spp_dnfkb_dendo_v2.pdf"),width=7,height=7)
+par(mar=c(5,5,3,3))
+plot((pd.need3 %>% filter(time_point=="Pre"))$`d.TNFa/NFkB`,d.scores[,"d.Endo"],
+     xlab="d.TNFa/NFkB",ylab="d.Endo",pch=20,col="grey60",
+     main=paste0("correlation between d.TNFa/NFkB and d.Endo\n(spearman=",signif(d.sp.te,3),")"))
+dev.off()
+
+# heatmap3(pe,scale="none",balanceColor=TRUE,margins=c(10,10))
+pdf(file=file.path(fig_dir1,"scc_mod_cts_pre_v2.pdf"),width=7,height=7)
+heatmap3(sp,scale="none",balanceColor=TRUE,margins=c(10,10),
+         main="correlation between module activity and cell types")
+dev.off()
+
+# heatmap3(d.pe,scale="none",balanceColor=TRUE,margins=c(10,10))
+pdf(file=file.path(fig_dir1,"scc_mod_cts_change_v2.pdf"),width=7,height=7)
+heatmap3(d.sp,scale="none",balanceColor=TRUE,margins=c(10,10),
+         main="correlation between changes in module activity and cell types")
+dev.off()
+```
+
+## DEG analysis 
+### Comparison of the baseline between AI-resistant and sensitive groups
+```{r}
+ex <- exprs(gset)
+syms <- fData(gset)$GENE_SYMBOL
+```
+
+```{r}
+pd.need.1 <- pd.need1 %>% 
+  mutate(my_response2 = c("sensitive","resistant")[1 + (d.ki67 > 0)]) %>%
+  mutate(my_response2 = factor(my_response2))
+  # filter(my_response1 %in% c("sensitive","resistant")) %>%
+  # mutate(my_response1 = factor(my_response1))
+pd.need.pre <- pd.need.1 %>% filter(time_point == "Pre")
+
+clin.ids <- tapply(pd.need.pre$id,pd.need.pre$my_response2,identity)
+
+out.bl <- data.frame(t(apply(ex,1,function(x1){
+  lfc <- mean(x1[clin.ids$sensitive],na.rm=T) - mean(x1[clin.ids$resistant],na.rm=T)
+  p.val <- try(t.test(x1[clin.ids$sensitive],x1[clin.ids$resistant],paired=FALSE)$p.value,silent=T)
+  if(class(p.val)=="try-error"){
+    p.val <- NA
+  }
+  return(c(lfc=lfc,p.val=p.val))
+}))) %>%
+  mutate(nlp=-log10(p.val)) %>%
+  mutate(GENE_SYMBOL=syms)
+
+fdr <- qvalue::qvalue(out.bl$p.val)$qvalues
+out.bl <- out.bl %>% 
+  mutate(qval = fdr) %>%
+  mutate(nlq = -log10(qval)) %>%
+  mutate(slq = sign(lfc) * nlq)
+
+## remove redundant genes
+idx <- tapply(seq(syms),syms,function(i){
+  tmp <- out.bl$nlq[i]
+  max.i <- i[which.max(tmp)]
+  if(length(max.i)==0){
+    max.i <- NA
+  }
+  return(max.i)
+},simplify=T)
+
+out.bl <- out.bl[idx,]
+out.bl <- out.bl[-1,]
+
+out.bl <- DE_category(out.bl,gs=mods)
+names(out.bl) <- c("logFC","P.value","-log10(P.value)","GENE_SYMBOL","adj.P.value","-log10(adj.P.value)","signed log adj.p","Gene_category")
+```
+
+#### Plot
+```{r}
+pdf(file=file.path(fig_dir1,"ACSOG_volcano_baseline_all_smpls_v3.pdf"),width=7,height=7)
+volcano_plot(out.bl,p.thres=-log10(0.5)) + ggtitle("Sensitive vs Resistant (Baseline)") 
+dev.off()
+```
+
+### Comparison of Pre-to-Post change between AI-resistant and sensitive groups
+#### Sensitive (pre and post)
+```{r}
+pd.need.sen <- pd.need.1 %>% 
+  filter(my_response2 == "sensitive") %>% 
+  mutate(my_response2 = factor(my_response2))
+
+clin.ids <- tapply(pd.need.sen$id,pd.need.sen$time_point,identity)
+
+out.sen <- data.frame(t(apply(ex,1,function(x1){
+  lfc <- mean(x1[clin.ids$Post],na.rm=T) - mean(x1[clin.ids$Pre],na.rm=T)
+  p.val <- t.test(x1[clin.ids$Pre],x1[clin.ids$Post],paired=T)$p.value
+  return(c(lfc=lfc,p.val=p.val))
+}))) %>%
+  mutate(nlp=-log10(p.val)) %>%
+  mutate(GENE_SYMBOL=syms) 
+
+fdr <- qvalue::qvalue(out.sen$p.val)$qvalues
+out.sen <- out.sen %>% 
+  mutate(qval = fdr) %>%
+  mutate(nlq = -log10(qval)) %>%
+  mutate(slq = sign(lfc) * nlq)
+
+## remove redundant genes
+idx <- tapply(seq(syms),syms,function(i){
+  tmp <- out.sen$nlq[i]
+  max.i <- i[which.max(tmp)]
+  return(max.i)
+},simplify=T)
+
+out.sen <- out.sen[idx,]
+out.sen <- out.sen[-1,]
+
+out.sen <- DE_category(out.sen,gs=mods)
+names(out.sen) <- c("logFC","P.value","-log10(P.value)","GENE_SYMBOL","adj.P.value","-log10(adj.P.value)","signed log adj.p","Gene_category")
+```
+
+#### Resistant (pre and post)
+```{r}
+pd.need.res <- pd.need.1 %>% 
+  filter(my_response2 == "resistant") %>% 
+  mutate(my_response2 = factor(my_response2))
+
+clin.ids <- tapply(pd.need.res$id,pd.need.res$time_point,identity)
+
+out.res <- data.frame(t(apply(ex,1,function(x1){
+  lfc <- mean(x1[clin.ids$Post],na.rm=T) - mean(x1[clin.ids$Pre],na.rm=T)
+  p.val <- t.test(x1[clin.ids$Pre],x1[clin.ids$Post],paired=T)$p.value
+  return(c(lfc=lfc,p.val=p.val))
+}))) %>%
+  mutate(nlp=-log10(p.val)) %>%
+  mutate(GENE_SYMBOL=syms) 
+
+fdr <- qvalue::qvalue(out.res$p.val)$qvalues
+out.res <- out.res %>% 
+  mutate(qval = fdr) %>%
+  mutate(nlq = -log10(qval)) %>%
+  mutate(slq = sign(lfc) * nlq)
+
+## remove redundant genes
+idx <- tapply(seq(syms),syms,function(i){
+  tmp <- out.res$nlq[i]
+  max.i <- i[which.max(tmp)]
+  return(max.i)
+},simplify=T)
+
+out.res <- out.res[idx,]
+out.res <- out.res[-1,]
+
+out.res <- DE_category(out.res,gs=mods)
+names(out.res) <- c("logFC","P.value","-log10(P.value)","GENE_SYMBOL","adj.P.value","-log10(adj.P.value)","signed log adj.p","Gene_category")
+
+```
+
+#### Plots
+```{r}
+## one way to do this - go with ratio, not diff.
+xl <- range(c(out.sen$logFC,out.res$logFC))
+yl <- range(c(out.sen$`-log10(adj.P.value)`,out.res$`-log10(adj.P.value)`))
+
+pdf(file=file.path(fig_dir1,"ACSOG_volcano_sen_all_smpls_v2.pdf"),width=7,height=7)
+volcano_plot(out.sen) + ggtitle("Sensitive to AI (Pre vs Post) (180 pts)") + xlim(xl) + ylim(yl)
+dev.off()
+
+pdf(file=file.path(fig_dir1,"ACSOG_volcano_res_all_smpls_v2.pdf"),width=7,height=7)
+volcano_plot(out.res) + ggtitle("Resistant to AI (Pre vs Post) (34 pts)") + xlim(xl) + ylim(yl)
+dev.off()
+```
+
+## FGSEA - MSigDB 
+### combine msigdb with mods
+```{r}
+msigdb <- readRDS("/Users/kenichishimada/Dropbox (HMS)/_projects_/B06 03 HR-APM/manuscript/Rdata/5_pathway_analysis/msigdb.rds")
+
+syms1 <- out.res$GENE_SYMBOL
+mods1 <- lapply(mods,function(x){
+  x <- unlist(x)
+  x <- x[x %in% syms]
+  return(x)
+})
+msigdb.1 <- c(msigdb,mods1)
+```
+
+### colors
+```{r}
+library(fgsea)
+# bl <- colorRampPalette(c("white","steelblue"))(6)[5]
+bl <- "steelblue"
+mycols <- c(bl,brewer.pal(3,"Dark2"))
+names(mycols) <- c("ERS","TNFa/NFkB","IFN-I","APM/TC")
+
+
+```
+
+### baseline
+```{r}
+sorted.bl <- out.bl %>% arrange(desc(`signed log adj.p`))
+slps.bl <- sorted.bl[["signed log adj.p"]]
+names(slps.bl) <- sorted.bl$GENE_SYMBOL
+fg1.bl <- fgsea(pathways = msigdb.1, 
+                  stats    = slps.bl,
+                  minSize  = 15,
+                  maxSize  = 500) %>%
+  mutate(slp = -log10(padj) * sign(ES))
+
+fg2.bl <- fg1.bl %>% 
+  mutate(text = "") %>% 
+  mutate(lab=1) %>%
+  arrange(desc(slp)) %>%
+  mutate(idx = seq(nrow(fg1.bl)))
+
+fg2.bl$text[match(c(names(mods)),fg2.bl$pathway)] <- names(mods)
+
+fg2.bl %>% filter(pathway %in% names(mods))
+
+### violin plot of the FGSEA results highlighting slp and the custom modules
+p <- ggplot(fg2.bl,aes(x=lab,y=slp)) + 
+  geom_violin() +
+  geom_point(data=fg2.bl %>% filter(pathway %in% names(mods)),aes(y=slp,color=pathway),pch=95,size=5) +
+  geom_text_repel(data=fg2.bl %>% filter(pathway %in% names(mods)),aes(label=text),size=3) +
+  scale_color_manual(values=mycols) +
+  theme_minimal() +
+  theme(legend.position="none")
+
+pdf(file=file.path(fig_dir1,"baseline_fgsea_violin.pdf"),width=4,height=7)
+print(p)
+dev.off()
+
+```
+
+### sensitive
+```{r}
+sorted.sen <- out.sen %>% arrange(desc(`signed log adj.p`))
+slps.sen <- sorted.sen[["signed log adj.p"]]
+names(slps.sen) <- sorted.sen$GENE_SYMBOL
+fg1.sen <- fgsea(pathways = msigdb.1, 
+                  stats    = slps.sen,
+                  minSize  = 15,
+                  maxSize  = 500) %>%
+  mutate(slp = -log10(padj) * sign(ES))
+
+fg2.sen <- fg1.sen %>% 
+  mutate(text = "") %>% 
+  mutate(lab=1) %>%
+  arrange(desc(slp)) %>%
+  mutate(idx = seq(nrow(fg1.sen)))
+
+fg2.sen$text[match(c(names(mods)),fg2.sen$pathway)] <- names(mods)
+
+fg2.sen %>% filter(pathway %in% names(mods))
+
+### violin plot of the FGSEA results highlighting slp and the custom modules
+p2 <- ggplot(fg2.sen,aes(x=lab,y=slp)) + 
+  geom_violin() +
+  ylim(c(-50,25)) +
+  geom_point(data=fg2.sen %>% filter(pathway %in% names(mods)),aes(y=slp,color=pathway),pch=95,size=5) +
+  geom_text_repel(data=fg2.sen %>% filter(pathway %in% names(mods)),aes(label=text),size=3) +
+  scale_color_manual(values=mycols) +
+  theme_minimal() +
+  theme(legend.position="none")
+
+pdf(file=file.path(fig_dir1,"baseline_fgsea_violin.pdf"),width=4,height=7)
+print(p2)
+dev.off()
+```
+
+### resistance
+```{r}
+sorted.res <- out.res %>% arrange(desc(`signed log adj.p`))
+slps.res <- sorted.res[["signed log adj.p"]]
+names(slps.res) <- sorted.res$GENE_SYMBOL
+fg1.res <- fgsea(pathways = msigdb.1, 
+                  stats    = slps.res,
+                  minSize  = 15,
+                  maxSize  = 500) %>%
+  mutate(slp = -log10(padj) * sign(ES))
+
+fg2.res <- fg1.res %>% 
+  mutate(text = "") %>% 
+  mutate(lab=1) %>%
+  arrange(desc(slp)) %>%
+  mutate(idx = seq(nrow(fg1.res)))
+
+fg2.res$text[match(c(names(mods)),fg2.res$pathway)] <- names(mods)
+
+fg2.res %>% filter(pathway %in% names(mods))
+
+### violin plot of the FGSEA results highlighting slp and the custom modules
+p3 <- ggplot(fg2.res,aes(x=lab,y=slp)) + 
+  geom_violin() +
+  ylim(c(-50,25)) +
+  geom_point(data=fg2.res %>% filter(pathway %in% names(mods)),aes(y=slp,color=pathway),pch=95,size=5) +
+  geom_text_repel(data=fg2.res %>% filter(pathway %in% names(mods)),aes(label=text),size=3) +
+  scale_color_manual(values=mycols) +
+  theme_minimal() +
+  theme(legend.position="none")
+
+pdf(file=file.path(fig_dir1,"baseline_fgsea_violin.pdf"),width=4,height=7)
+print(p3)
+dev.off()
+```
+
+```{r}
+fg2.s <- fg2.sen %>% select(pathway,slp)
+fg2.r <- fg2.res %>% select(pathway,slp) 
+
+fg2.sr <- fg2.r %>% 
+  left_join(fg2.s,by="pathway") %>%
+  mutate(text="")  
+
+fg2.sr$text[match(c(names(mods)),fg2.sr$pathway)] <- names(mods)
+fg2.sr$text[fg2.sr$slps.res < -10 & fg2.sr$slps.sen < -10] <- 
+  fg2.sr$pathway[fg2.sr$slps.res < -10 & fg2.sr$slps.sen < -10]
+names(fg2.sr) <- c("pathway","slps.res","slps.sen","text")
+
+## asp =1
+
+p4 <- ggplot(fg2.sr %>% filter(!text %in% names(mods)),   aes(x=slps.res,y=slps.sen)) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0) +
+  geom_point(color="grey80") +
+  geom_point(data=fg2.sr %>% filter(text %in% names(mods)),aes(color=text)) +
+  scale_color_manual(values=mycols) +
+  geom_text_repel(data=fg2.sr %>% filter(text!=""),aes(label=text)) +
+  # geom_abline(intercept = 0, slope = 1) +
+  xlab("signed log adj.p (Resistant)") +
+  ylab("signed log adj.p (Sensitive)") +
+  ggtitle("FGSEA results (Resistant vs Sensitive)") +
+  theme_minimal() +
+  theme(legend.position="none")
+
+pdf(file=file.path(fig_dir1,"changes_fgsea_sen_res.pdf"),width=7,height=7)
+print(p4)
+dev.off()
+```
+
+
+## Save analysis objects
+```{r}
+if(0){
+  save(full_results,
+       full_results_1,
+       pd.need, 
+       design,
+       resis.design,
+       sens.design,
+       full_results_res,
+       full_results_sens, 
+       file=file.path(obj_dir,"clinical","ACOSOG_data.rda"))
+}else{
+  x <-  load(file=file.path(obj_dir,"clinical","ACOSOG_data.rda"))
+}
+```
