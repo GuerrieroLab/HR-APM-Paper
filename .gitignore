@@ -3,6 +3,7 @@ src_archive
 src_clin
 .Renviron
 .Rhistory
+.Rprofile
 .Rproj.user
 *.html
 *.Rproj
