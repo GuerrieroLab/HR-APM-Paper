@@ -11,12 +11,15 @@ date: '2023-07-30'
 
 ## Initial setup ---------------------------
 
-### Re-install CycifAnalyzeR after updating the package
+### Install CycifAnalyzeR after updating the package (required only when)
 ```{r reinstall_CyCIF_ library,eval=F}
- suppressPackageStartupMessages({
-  devtools::install_github("kenichi-shimada/CycifAnalyzeR",force=TRUE)
-  # devtools::load_all("/Users/kenichishimada/Dropbox (HMS)/_projects_/B00 CyCIF/CycifAnalyzeR")
-})
+## this following code runs only when CycifAnalyzeR is not installed
+if(!"CycifAnalyzeR" %in% installed.packages()){
+   ## rgeos (outdated package) should be installed from source
+  install.packages("https://cran.r-project.org/src/contrib/Archive/rgeos/rgeos_0.6-4.tar.gz",
+                   repos=NULL,type="source")
+  devtools::install_github("kenichi-shimada/CycifAnalyzeR@v1.0",force=TRUE)
+}
 ```
 
 ### Load packages
@@ -38,13 +41,20 @@ suppressPackageStartupMessages({
   library(data.table)
   library(CycifAnalyzeR)
 })
+source(file.path(src_dir,"cycif_utils.R"))
+```
+### Set up paths
+```{r}
+obj_dir1 <- file.path(obj_dir,"DFBCC_cycif")
+fig_dir1 <- file.path(fig_dir,"18_DFBCC_cycif_analysis_1")
+dir.creates(fig_dir1,"distance")
+dir.creates(fig_dir1,"cn_frnn")
 ```
 
 ### Load `cs1`
 ```{r define cell types} 
-cs1 <- readRDS(file=file.path(cycif_obj_dir,"cs1_cts_102624.rds"))
+cs1 <- readRDS(file=file.path(obj_dir1,"cs.rds"))
 ```
-
 ### Module activity `df.gs`
 ```{r}
 # cor(m,m) # column-wise comparison
@@ -70,9 +80,8 @@ nms <- names(cs1)
 
 this.cts <- cell_types(cs1)
 used.cts <- levels(this.cts$cell_types)[1:12] # remove Imm_other, all_other, outOfROI
-  
 
-if(0){
+if(0){ # run this once
   cts.all <- table(this.cts)[,used.cts] 
   
   ns <- rowSums(cts.all)
@@ -81,16 +90,13 @@ if(0){
   for(nm in nms){
     cat(nm,"..\n")
     x1 <- cs1[[nm]]
-    obj <- defineTumorStroma(x1, n.cores = 7, dth=dth, concavity = 0.8, plot = FALSE)
-    saveRDS(obj,file.path(cycif_obj_dir,"distance",paste0("defTS_",nm,".rds")))
+    obj <- defineTumorStroma(x1, n.cores = 1, dth=dth, concavity = 0.8, plot = FALSE)
+    saveRDS(obj,file.path(obj_dir1,"distance",paste0("defTS_",nm,".rds")))
   }
-}else{
+}else{ # from next time, you can load the saved objects
   lst.dists  <- list()
   for(nm in nms){
-    # x1 <- cs1[[nm]]
-    # obj <- defineTumorStroma(x1, n.cores = 7, dth=dth, concavity = 0.8, plot = FALSE)
-    # saveRDS(obj,file.path(cycif_obj_dir,"distance",paste0("defTS_",nm,".rds")))
-    lst.dists[[nm]] <- readRDS(file.path(cycif_obj_dir,"distance",paste0("defTS_",nm,".rds")))
+    lst.dists[[nm]] <- readRDS(file.path(obj_dir1,"distance",paste0("defTS_",nm,".rds")))
   }
 }
 ```
@@ -98,7 +104,7 @@ if(0){
 ### `lst.frnn` - computeCN()
 ```{r}
 n.sampling <- 10000
-if(0){
+if(0){ # run this once
   for(nm in nms){
     cat(nm,"\t")
     x <- cs1[[nm]]
@@ -107,12 +113,12 @@ if(0){
                      used.cts = used.cts,
                      n.sampling=n.sampling,
                      seed=123)
-    saveRDS(obj,file.path(cycif_obj_dir,"cn_frnn",paste0("cn_frnn_",nm,".rds")))
+    saveRDS(obj,file.path(obj_dir1,"cn_frnn",paste0("cn_frnn_",nm,".rds")))
   }
-}else{
+}else{ # from next time, you can load the saved objects
   lst.frnn <- list()
   for(nm in nms){
-    lst.frnn[[nm]] <- readRDS(file.path(cycif_obj_dir,"cn_frnn",paste0("cn_frnn_",nm,".rds")))
+    lst.frnn[[nm]] <- readRDS(file.path(obj_dir1,"cn_frnn",paste0("cn_frnn_",nm,".rds")))
   }
 }
 ```
@@ -148,20 +154,6 @@ for(nm in nms){
   is.cancer <- this.cts1 == "Cancer"
   tum.d <- this.dist[is.cancer]
   
-  if(0){
-    ## distance of cancer cells
-    xx <- hist(tum.d,breaks=1000,main="distance of cancer cells from border",plot=F)
-    ymax <- max(xx$counts)
-  
-    fn <- paste0("dist_tum_",nm,".png")
-    pdf(file.path(cycif_fig_dir,"slide_dist","dist_tumor",fn),width=7,height=7)
-    xx <- hist(tum.d,breaks=1000,main="distance of cancer cells from border",ylim=c(0,ymax * .1))
-    abline(v=c(0,304,1000),col=2)
-    dev.off()
-  
-    hist(tum.pos.d,breaks=1000)
-  }
-  
   tum.pos.d <- tum.d[tum.d > 0 & tum.d < 1000 & !is.na(tum.d)]
   sds[[nm]] <- sqrt(sum(tum.pos.d^2)/length(tum.pos.d)) # mean distance between tumor region and tumor buds
   
@@ -171,13 +163,11 @@ for(nm in nms){
 }
 
 freq.ts <- apply(do.call(cbind,freq.stat),2,function(x)x/sum(x))
-```
 
-```{r}
 if(0){
-  save(freq.ts,sds,file=file.path(cycif_obj_dir,"freq_ts.rda"))
+  save(freq.ts,sds,file=file.path(obj_dir1,"freq_ts.rda"))
 }else{
-  load(file=file.path(cycif_obj_dir,"freq_ts.rda"))
+  load(file=file.path(obj_dir1,"freq_ts.rda"))
 }
 ```
 
@@ -186,7 +176,7 @@ if(0){
 
 cols <- brewer.pal(6,"Paired")[c(6,5,2,1)]
 
-pdf(file.path(cycif_fig_dir,"ts_axis","freq_cancer_buds.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"ts_axis","freq_cancer_buds.pdf"),width=7,height=7)
 par(mar=c(5,4,4,10))
 barplot(freq.ts,las=2,main="# of cancer and non-cancer cells inside and outside\nthe cancer region",
         col=cols,cex.names=.7)
@@ -205,7 +195,7 @@ ratio.st.tum <- freq.ts[3,]/freq.ts[1,]
 cor.p <- cor(df.gs[,"ERS"],ratio.st.tum)
 lm1 <- lm(ratio.st.tum ~ df.gs[,"ERS"])
 
-pdf(file.path(cycif_fig_dir,"ts_axis","ERS_vs_tumor_buds.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"ts_axis","ERS_vs_tumor_buds.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 plot(df.gs[,"ERS"],ratio.st.tum,
      xlab="ERS activity",pch=20,
@@ -298,7 +288,7 @@ srt.cts <- levels(log.rts$cell_type)
 rts.p[srt.cts] < 0.05
 
 fn <- paste0("ts_ratio_v3.pdf")
-pdf(file.path(cycif_fig_dir,"ts_axis",fn),width=6,height=7)
+pdf(file.path(fig_dir1,"ts_axis",fn),width=6,height=7)
 print(p)
 dev.off()
 ```
@@ -345,7 +335,7 @@ p <- ggplot(log.rts.mac,aes(cell_type,log_ratio)) +
   ylab("log2(ratio of positive to negative distance)")
 
 fn <- paste0("ts_ratio_mac.pdf")
-pdf(file.path(cycif_fig_dir,"ts_axis",fn),width=3,height=7)
+pdf(file.path(fig_dir1,"ts_axis",fn),width=3,height=7)
 print(p)
 dev.off()
 
@@ -361,11 +351,11 @@ rts.mat <- log.rts %>%
 pe <- cor(rts.mat,df.gs,method="pearson",use="pairwise.complete.obs")[rev(used.cts[-1]),]
 sp <- cor(rts.mat,df.gs,method="spearman",use="pairwise.complete.obs")[rev(used.cts[-1]),]
 
-pdf(file.path(cycif_fig_dir,"ts_axis","cor_w_ts_ratio","pearson_imm.pdf"),width=8,height=7)
+pdf(file.path(fig_dir1,"ts_axis","pcc_imm.pdf"),width=8,height=7)
 heatmap3(pe[,-1],Colv=NA,Rowv=NA,scale="none",balanceColor=TRUE,margins=c(10,10),main="pearson")
 dev.off()
 
-pdf(file.path(cycif_fig_dir,"ts_axis","cor_w_ts_ratio","spearman_imm.pdf"),width=8,height=7)
+pdf(file.path(fig_dir1,"ts_axis","scc_imm.pdf"),width=8,height=7)
 heatmap3(sp[,-1],Colv=NA,Rowv=NA,scale="none",balanceColor=TRUE,margins=c(10,10),main="spearman")
 dev.off()
 ```
@@ -395,7 +385,7 @@ for(ct in ucts){
       ylab(paste0("log2 (TS ratio)")) +
       theme_minimal() +
       theme(legend.position="none")
-    pdf(file.path(cycif_fig_dir,"ts_axis","cor_w_ts_ratio",
+    pdf(file.path(fig_dir1,"ts_axis","cor_w_ts_ratio",
                   paste0(ct,"_",sub("/","",m),".pdf")),width=7,height=7)
     print(p)
     dev.off()
@@ -439,7 +429,7 @@ for(nm in nms){
   names(cols) <- seq(-th,th)
   
   fn <- paste0("dist_ts_",nm,".png")
-  png(file.path(cycif_fig_dir,"ts_axis","slide_dist",fn),width=700,height=700)
+  png(file.path(fig_dir1,"ts_axis","slide_dist",fn),width=700,height=700)
   plot(xy.sf[[1]],pch=".",add=F,col=cols[as.character(round(tdist))])
   plot(this.b[[1]],add=T)
   dev.off()
@@ -499,7 +489,7 @@ for(nm in nms){
 
   ## all cells  
   fn <- paste0("cn_",nm,"_all.png")
-  png(file.path(cycif_fig_dir,"ts_axis","slide_ncells",fn),width=700,height=700)
+  png(file.path(fig_dir1,"ts_axis","slide_ncells",fn),width=700,height=700)
   plot(xy.sf1[[1]],col=cols[as.character(n.cells)],pch='.',main="# cells")
   plot(b[[1]],border=1,lwd=.5,add=T)
   dev.off()
@@ -513,7 +503,7 @@ for(nm in nms){
   names(cols) <- seq(th)
   
   fn <- paste0("cn_",nm,"_tum.png")
-  png(file.path(cycif_fig_dir,"ts_axis","slide_ncells",fn),width=700,height=700)
+  png(file.path(fig_dir1,"ts_axis","slide_ncells",fn),width=700,height=700)
   plot(xy.sf1[[1]],col=cols[as.character(n.tum)],pch='.',main="# cancer cells")
   plot(b[[1]],border=1,lwd=.5,add=T)
   dev.off()
@@ -533,7 +523,7 @@ for(nm in nms){
   names(cols) <- seq(th)
   
   fn <- paste0("cn_",nm,"_str.png")
-  png(file.path(cycif_fig_dir,"ts_axis","slide_ncells",fn),width=700,height=700)
+  png(file.path(fig_dir1,"ts_axis","slide_ncells",fn),width=700,height=700)
   plot(xy.sf1[[1]],col=cols[as.character(n.str)],pch='.',main="# non-cancer cells")
   plot(b[[1]],border=1,lwd=.5,add=T)
   dev.off()
@@ -574,8 +564,6 @@ for(nm in nms){
 
 ### *****k-means clustering*****
 ```{r}
-# [[[check these dim/length here]]]
-## distance from tumor border
 cts <- cell_types(cs1)
 
 is.used <- lapply(nms,function(nm){ ## is the cell types among used.cts
@@ -605,7 +593,6 @@ lst.frnn.bulk.exp <- lapply(lst.frnn,function(x){
   return(tmp)
 })
 lst.frnn.ct.exp <- lapply(lst.frnn,function(x)x@exp.per.ct.cn)
-
 ```
 
 ### `is.ge10` - cells with at least 10 cells in the neighborhood
@@ -636,15 +623,15 @@ frnn.freq.ge10 <- frnn.freq[is.ge10,]
 #### [Fig.S] number of cells in each cell neighborhood
 
 ```{r}
-if(1){
-  pdf(file.path(cycif_fig_dir,"cn","n_cells_dist.pdf"),width=7,height=7)
-  par(mar=c(5,5,3,3))
-  hist(frnn.rcn.n,breaks=60,freq=F,border=NA,col="grey",
-       main="number of cells in cell neighborhood\n(all samples)",
-       xlab="# cells in cell neighborhood")
-  abline(v=10,col=1)
-  dev.off()
-}
+
+pdf(file.path(fig_dir1,"cn","n_cells_dist.pdf"),width=7,height=7)
+par(mar=c(5,5,3,3))
+hist(frnn.rcn.n,breaks=60,freq=F,border=NA,col="grey",
+     main="number of cells in cell neighborhood\n(all samples)",
+     xlab="# cells in cell neighborhood")
+abline(v=10,col=1)
+dev.off()
+
 ```
 
 
@@ -656,7 +643,6 @@ ilr.freq.ge10 <- ilr.freq[is.ge10,]
 
 ### PCA - this include all the samples, because the clustering is based on the cell type frequency
 ```{r}
-# frnn
 smpls.ge10 <- factor(smpls[is.ge10],levels=nms)
 
 n.smpls <- table(smpls)
@@ -715,26 +701,20 @@ system.time(
 )
 
 if(0){
-  # compute distance betwen pca_data and centers -> straightforward but slow
-  cluster_assignments <- apply(pca_data_all,1,function(x){
+  # DON'T RUN THIS: compute distance betwen pca_data and centers -> straightforward but slow
+  cluster_assignments0 <- apply(pca_data_all,1,function(x){
     dists <- apply(km$centers,1,function(y)sum((x-y)^2))
     return(which.min(dists))
   })
 }else{
-  # faster calculation of extrapolating kmeans
+  # THE SAME faster calculation of extrapolating kmeans
   sum_squares_x <- rowSums(pca_data_all^2)
   sum_squares_y <- rowSums(km$centers^2)
   cross_term <- -2 * pca_data_all %*% t(km$centers)
   squared_dists <- 
     outer(sum_squares_x, sum_squares_y, "+") + cross_term
-  cluster_assignments0 <- cluster_assignments <- 
-    max.col(-squared_dists, ties.method = "first")
-
-  freq.clusts <- table(cluster_assignments)/length(cluster_assignments)
+  cluster_assignments0 <- max.col(-squared_dists, ties.method = "first")
 }
-
-# sorted.clusts <- names(sort(table(cluster_assignments),decreasing=T))
-# cluster_assignments1 <- as.numeric(factor(cluster_assignments,levels=as.integer(sorted.clusts)))
 ```
 
 ### Compile `clfreq`  after `df`
@@ -764,10 +744,9 @@ cluster_assignments <- as.numeric(factor(cluster_assignments0,levels=o))
 #### save `cluster_assignments`
 ```{r}
 if(0){
-  saveRDS(cluster_assignments,
-          file.path(cycif_obj_dir,"cluster_assignments_kmeans_all_v1_102624.rds"))
+  saveRDS(cluster_assignments,file.path(obj_dir1,"cluster_assignments_kmeans_all.rds"))
 }else{
-  cluster_assignments <- readRDS(file.path(cycif_obj_dir,"cluster_assignments_kmeans_all_v1_102624.rds"))
+  cluster_assignments <- readRDS(file.path(obj_dir1,"cluster_assignments_kmeans_all.rds"))
 }
 ```
 
@@ -809,11 +788,6 @@ df.cn <- cbind(tmp1,
 
 ### `bin_values`: binned distance
 ```{r}
-bin_values <- function(x, width = 20) {
-  bin_start <- floor((x + width/2) / width) * width
-  return(bin_start)
-}
-
 df.cn <- df.cn %>% mutate(d1=bin_values(d,width=20))
 ```
 
@@ -821,26 +795,21 @@ df.cn <- df.cn %>% mutate(d1=bin_values(d,width=20))
 ### save `df.cn` for further analysis
 ```{r}
 if(0){
-  saveRDS(df.cn,file.path(cycif_obj_dir,"df.cn.rds"))
+  saveRDS(df.cn,file.path(obj_dir1,"cn","CN_anlaysis_data.rds"))
 }else{
-  df.cn <- readRDS(file.path(cycif_obj_dir,"df.cn.rds"))
-}
-```
-## T cells (CD4 + CD8 T cells) -----
-### Analysis along tumor-stroma axis
-#### `moving_average` function: smoothening the counts
-```{r}
-## values are averaged by bin_values (binning by 20 pixels, then moving average by 10 running bins)
-moving_average <- function(y, n = 3) {
-  # Create a filter that averages 'n' points
-  filter <- rep(1/n, n)
-  # Apply the filter to the y values
-  stats::filter(y, filter, sides = 2)
+  df.cn <- readRDS(file.path(obj_dir1,"cn","CN_analysis_data.rds"))
 }
 ```
 
+## T cells (CD4 + CD8 T cells) -----
+### Analysis along tumor-stroma axis
+
 ### [Fig 5E] # of T cells per distance
 ```{r}
+df.cn.t <- df.cn %>% 
+  mutate(n.t.48 = as.integer((CD4T_Treg + CD4T_nonTreg + CD8T) * n)) %>% # CD4T_nonTreg and CD8T
+  mutate(n.t.all = as.integer((CD4T_Treg + CD4T_nonTreg+ CD8T + T_other) * n)) # all T
+
 df.cn.t0 <- df.cn.t %>% 
   filter(is.selected) %>%
   filter(n.t.48 > 0)
@@ -903,7 +872,7 @@ p1 <- ggplot(r5.1,aes(x=d1,y=freq,color=cell_types)) +
     ggtitle("Spatial distribution of T cells and distance from tumor border") +
     theme_minimal()
 
-pdf(file.path(cycif_fig_dir,"t_cell","T_freq_per_distance_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"t_cell","T_freq_per_distance.pdf"),width=7,height=7)
 print(p1)
 dev.off()
 ```
@@ -955,7 +924,7 @@ p2 <- ggplot(r5.2,aes(x=d1,y=N_T_cells,color=cell_types)) +
     ggtitle("Local T cell density and distance from tumor border") +
     theme_minimal()
 
-pdf(file.path(cycif_fig_dir,"t_cell","T_density_per_CN_per_distance_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"t_cell","T_density_per_CN_per_distance.pdf"),width=7,height=7)
 print(p2)
 dev.off()
 ```
@@ -1021,7 +990,7 @@ gg_color_hue <- function(n) {
 }
 cols <- gg_color_hue(4)
 
-pdf(file.path(cycif_fig_dir,"t_cell","PD1_per_distance_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"t_cell","PD1_per_distance.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 smoothScatter(df.cn.t2.sele$n.t.48,df.cn.t2.sele$PD1.self,pch=20,cex=.3,
               # colramp=cols,
@@ -1046,15 +1015,15 @@ if(0){
   nms <- names(cs1)
   
   areas <- list()
-  for(nm in nms){
+  for(nm in nms[1:2]){
     cat(nm,"\n")
     areas[[nm]] <- computeArea(cs1[[nm]],dth=dth,plot=FALSE) 
   }
   areas <- do.call(c,areas)
 
-  saveRDS(areas,file.path(cycif_obj_dir,"cs1_areas.rds"))
+  saveRDS(areas,file.path(obj_dir1,"sample_areas.rds"))
 }else{
-  areas <- readRDS(file.path(cycif_obj_dir,"cs1_areas.rds"))
+  areas1 <- readRDS(file.path(obj_dir1,"sample_areas.rds"))
 }
 
 ```
@@ -1096,6 +1065,12 @@ p1 <- ggplot(df.cn.t3,aes(x=n.t.smpl.dens,y=n.pd1,label=smpl,color=as.numeric(sm
   ggtitle(paste0("T cell density vs PD1 expression (SCC: ",round(cor1,3),")")) +
   xlab("T cell density (count/mm2)") +
   ylab("Mean PD1 expression per sample")
+
+##
+pdf(file.path(fig_dir1,"t_cell","T_density_vs_PD1.pdf"),width=7,height=7)
+print(p1)
+dev.off()
+
 ```
 
 ### [Fig 5I-2] clustered T cell density vs PD1 expression
@@ -1110,6 +1085,11 @@ p2 <- ggplot(df.cn.t3,aes(x=r.t.ge5,y=n.pd1,label=sub("df","",smpl),color=30-as.
   ggtitle(paste0("Clustered T cell frequency vs PD1 expression (SCC: ",round(cor2,3),")")) +
   xlab("Frequency of clustered T cells (> 5/CN) over all T cells") + 
   ylab("Mean PD1 expression per sample")
+##
+pdf(file.path(fig_dir1,"t_cell","clustered_T_vs_PD1.pdf"),width=7,height=7)
+print(p2)
+dev.off()
+
 ```
 
 ### [Fig 5I-3] clustered T cell density vs PD1 expression (not used)
@@ -1125,23 +1105,12 @@ p3 <- ggplot(df.cn.t3,aes(x=n.t.ge5.dens,y=n.pd1,label=sub("df","",smpl),color=a
   ggtitle(paste0("T cell density vs PD1 expression (SCC: ",round(cor1,3),")")) +
   xlab("T cell density (count/mm2)") +
   ylab("Mean PD1 expression per sample")
-```
-
-```{r}
-##
-pdf(file.path(cycif_fig_dir,"t_cell","T_density_vs_PD1_v2.pdf"),width=7,height=7)
-print(p1)
-dev.off()
 
 ##
-pdf(file.path(cycif_fig_dir,"t_cell","clustered_T_vs_PD1_v2.pdf"),width=7,height=7)
-print(p2)
-dev.off()
-
-##
-pdf(file.path(cycif_fig_dir,"t_cell","clustered_T_density_vs_PD1_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"t_cell","clustered_T_density_vs_PD1.pdf"),width=7,height=7)
 print(p3)
 dev.off()
+
 ```
 
 ### [Fig S9B-right] PD1 expression per T cell subtype and 
@@ -1173,7 +1142,7 @@ p.pd1 <- ggplot(m.pd1,aes(x=d1,y=expression,color=cell_types)) +
   xlab("Distance from tumor border  (µm)") +
   ylab("mean PD1 expression")
 
-pdf(file.path(cycif_fig_dir,"t_cell","PD1_per_distance_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"t_cell","PD1_per_distance.pdf"),width=7,height=7)
 print(p.pd1)
 dev.off()
 
@@ -1189,7 +1158,7 @@ scol1 <- cbind(t_assoc=c("grey80","black")[is.ta+1])
 
 ## this is not corrected for the number of cells per sample ?? No?
 cor.freq <- cor(frnn.freq.sele,method="spearman")
-pdf(file.path(cycif_fig_dir,"cn","cor_sp_freq_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"cn","cor_sp_freq.pdf"),width=7,height=7)
 heatmap3(cor.freq,scale="none",
          main="co-localization of cell types\n(co-occurrence in CNs)",balanceColor=TRUE,margins=c(10,10),
          RowSideColors=scol1,ColSideColors=scol1)
@@ -1266,7 +1235,7 @@ p.m <- ggplot(m5,aes(x=d1,y=freq,color=cell_types)) +
     ggtitle("Spatial distribution of macrophages") +
     theme_minimal()
 
-pdf(file.path(cycif_fig_dir,"ts_axis","macs","plot_mac_freq_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"ts_axis","mac_freq_per_distance.pdf"),width=7,height=7)
 print(p.m)
 dev.off()
 ```
@@ -1389,14 +1358,14 @@ es.distance <- lapply(names(e.size),function(nm){
   return(v.d)
 })
 
-boxplot(e.d)
-abline(h=0,col=2)
-
-mean.es <- sapply(es.distrib,function(x)mean(x>10))
-plot(df.gs[,2],mean.es)
-
-mean.ds <- sapply(e.d,function(x)mean(x>0),na.rm=T)
-plot(df.gs[,2],mean.ds)
+# boxplot(e.d)
+# abline(h=0,col=2)
+# 
+# mean.es <- sapply(es.distrib,function(x)mean(x>10))
+# plot(df.gs[,2],mean.es)
+# 
+# mean.ds <- sapply(e.d,function(x)mean(x>0),na.rm=T)
+# plot(df.gs[,2],mean.ds)
 
 ###
 es1 <- unlist(e.size)
@@ -1423,31 +1392,18 @@ p <- ggplot(e.df,aes(x=d1,y=size)) +
   ggtitle("Distribution of endothelial network size along tumor-stroma axis") + 
   theme_minimal()
 
-pdf(file.path(cycif_fig_dir,"ts_axis","endo","median_endo_size_freq_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"endo","median_endo_size_freq.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
 
 
-```{r}
-# e.df.sum <- data.frame(d=ed1,size=es1)  
-# e.df1 <- e.df.sum %>%  filter(d < 1000 & d > -500 & size < 200) 
-# 
-# abline(h=0,v=0)
-# lines(e.df.r,lty=2)
-# smpl <- rep(nms,sapply(e.size,length))
-```
-
-```{r}
-# n.endo <- sapply(e.size,length)
-# hist(es1,breaks=1000,ylim=c(0,1000),xlim=c(0,200))
-# mean.es1 <- tapply(es1>20,smpl,mean)
-# plot(n.endo,mean.es1)
-```
 
 ```{r}
 if(0){
-  pdf(file.path(cycif_fig_dir,"cn_various","endo_size_dist.pdf"),width=7,height=7)
+  ## this is heavily biased by the skewed distribution of distance of cells from tumor border; 
+  ## abundance of peri-tumoral cells (d ~ 0) affects this distribution
+  pdf(file.path(fig_dir1,"cn_various","endo_size_dist.pdf"),width=7,height=7)
   par(mar=c(5,5,3,3))
   smoothScatter(ed1,es1,colramp=colorRampPalette(c("white",blues9[-(1:2)])),
                 main="relationship between vascular cluster size and depth",
@@ -1463,19 +1419,13 @@ if(0){
 
 ### [Fig 5N-2] endo size and distance distribution
 ```{r}
-bin_values <- function(x, width = 20) {
-  bin_start <- floor((x + width/2) / width) * width
-  return(bin_start)
-}
-
 n0 <- df.cn.t0 %>%
   group_by(d1) %>%
   summarize(n=n())
 
-n.endo <- data.frame(smpl=factor(smpl,levels=nms),e.size=es1,e.dist=ed1) %>%
+smpls.endo <- rep(names(e.size),sapply(e.size,length))
+n.endo <- data.frame(smpl=factor(smpls.endo,levels=nms),e.size=es1,e.dist=ed1) %>%
   mutate(d1=bin_values(e.dist,width=20))
-  # group_by(d1) %>%
-  # summarize(n.all=sum(n.cells),.groups="drop")
 
 n.endo.large <- n.endo %>%
   filter(e.size > 40) %>%
@@ -1525,7 +1475,7 @@ p <- ggplot(n.e,aes(x=d1,y=ratio,color=size)) +
   ggtitle("Distribution of endothelial cells along tumor-stroma axis") + 
   theme_minimal()
 
-pdf(file.path(cycif_fig_dir,"ts_axis","endo","plot_endo_size_freq_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"endo","plot_endo_size_freq.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -1551,7 +1501,7 @@ n.all <- df.cn %>%
   summarize(n.all = n())
   
 ##
-n.endo <- data.frame(smpl=factor(smpl,levels=nms),e.size=es1,e.dist=ed1) %>%
+n.endo <- data.frame(smpl=factor(smpls.endo,levels=nms),e.size=es1,e.dist=ed1) %>%
   filter(!is.na(e.dist)) %>%
   mutate(size.small = factor(e.size < n1,levels=c("TRUE","FALSE"))) %>%
   mutate(is.stroma = factor(e.dist > d1,levels=c("TRUE","FALSE"))) %>%
@@ -1594,7 +1544,6 @@ cor0 <- cor(n.endo1,df.gs[,"TNFa/NFkB"],method="pearson",use="pairwise.complete.
 ```
 
 ```{r}
-# cors <- c(cor500[c(1,3)],cor0)[c(1,3:4,2,5:7)]
 rownames(cor0) <- sub("^r.","",rownames(cor0))
 cors.df.cn <- cor0[c(1,3,7,2,4,8,10),,drop=F] %>%
   as.data.frame() %>%
@@ -1613,7 +1562,7 @@ p <- ggplot(cors.df.cn,aes(x=smpl,y=PCC,fill=cell_type)) +
   xlab("") +
   ggtitle("NFkB activity and endo frequency (str is d > 500)")
 
-pdf(file.path(cycif_fig_dir,"ts_axis","endo","endo_size_loc and NFkB_v2.pdf"),width=5,height=7)
+pdf(file.path(fig_dir1,"endo","endo_size_loc and NFkB.pdf"),width=5,height=7)
 print(p)
 dev.off()
 ```

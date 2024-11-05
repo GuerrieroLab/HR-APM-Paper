@@ -11,15 +11,17 @@ date: '2023-02-16'
 
 ## Initial setup ---------------------------
 
-### Install CycifAnalyzeR
-```{r reinstall_CycifAnalyzeR, eval=FALSE}
-# Install or update the CycifDataAnalysis package from GitHub
-# Uncomment the line below to install or update the package
-# devtools::install_github("kenichi-shimada/CycifDataAnalysis", force=TRUE)
-
-# Load CycifAnalyzeR package from a local directory
-devtools::load_all("/Users/kenichishimada/Dropbox (HMS)/_projects_/B00 CyCIF/CycifAnalyzeR")
+### Install CycifAnalyzeR after updating the package (required only when)
+```{r reinstall_CyCIF_ library,eval=F}
+## this following code runs only when CycifAnalyzeR is not installed
+if(!"CycifAnalyzeR" %in% installed.packages()){
+   ## rgeos (outdated package) should be installed from source
+  install.packages("https://cran.r-project.org/src/contrib/Archive/rgeos/rgeos_0.6-4.tar.gz",
+                   repos=NULL,type="source")
+  devtools::install_github("kenichi-shimada/CycifAnalyzeR@v1.0",force=TRUE)
+}
 ```
+
 
 ### Load packages
 
@@ -30,13 +32,19 @@ suppressPackageStartupMessages({
   library(gplots)       # For various plotting tools
   library(RColorBrewer) # For color palettes
   library(mclust)       # For Gaussian mixture models and clustering
-  # library(largeVis)  # For high-dimensional data visualization
   library(openxlsx)     # For Excel file operations
   library(dplyr)        # For data manipulation
+  library(tibble)
   library(ggplot2)      # For data visualization
   library(ggrepel)      # For non-overlapping text labels in ggplot2
   library(heatmap3)     # For heatmap generation
 })
+```
+
+### Set up paths
+```{r}
+obj_dir1 <- file.path(obj_dir,"DFBCC_cycif")
+fig_dir1 <- file.path(fig_dir,"17_DFBCC_cycif_prep")
 ```
 
 ### Load quantification csv files into a `CycifStack` object
@@ -44,9 +52,9 @@ suppressPackageStartupMessages({
 if(0){
   fns1 <- dir(path=quant_data_dir,pattern=".+cellRing\\.csv")[1:3]
   cs1 <- CycifStack(fns1,path=quant_data_dir,mask_type="cellRing",mcmicro=FALSE)
-  saveRDS(cs1,file.path(cycif_obj_dir,"cs_073023.rds")) 
+  saveRDS(cs1,file.path(obj_dir1,"cs_073023.rds")) 
 }else{
-  cs1 <- readRDS(file.path(cycif_obj_dir,"cs_073023.rds"))  
+  cs1 <- readRDS(file.path(obj_dir1,"cs_073023.rds"))  
 }
 
 ```
@@ -68,7 +76,7 @@ nCycles(cs1) <- n.cycle
 ### Prepare ROIs exported from OMERO
 ```{r}
 # Define directory for ROIs and load them
-rois_dir <- "/Users/kenichishimada/Dropbox (HMS)/_projects_/B06 03 HR-APM/cycif/example/rois"
+rois_dir <- file.path(cycif_data_dir,"rois")
 fns <- dir(rois_dir, pattern="csv$")
 names(fns) <- sub("-.+$", "", fns)
 
@@ -120,7 +128,7 @@ for(smpl in smpls[-1]){
   wr <- factor(as.numeric(tmp@within_rois)+1,labels=c("no","yes"))
   uniq.cols <- c("grey80","red")
   names(uniq.cols) <- levels(wr)
-  png(file.path(cycif_fig_dir,"prep_rois",paste0("rois_",smpl,".png")),width=700,height=700)
+  png(file.path(fig_dir1,"prep_rois",paste0("rois_",smpl,".png")),width=700,height=700)
   slidePlot(tmp,
             plot_type="custom",
             custom_labs=wr,
@@ -140,7 +148,7 @@ smpls <- names(cs1)
 
 if(0){
   cs2 <- lapply(smpls,function(smpl){
-     readRDS(file.path(cycif_obj_dir,"dna_filtered",paste0(smpl,".rds")))
+     readRDS(file.path(obj_dir1,"dna_filtered",paste0(smpl,".rds")))
   })
   
   for(smpl in smpls){
@@ -150,7 +158,7 @@ if(0){
 
 for(smpl in smpls){
   cs1[[smpl]] <- dnaFilter(cs1[[smpl]],show.only=T) # if dna.thres is available, used_cells are computed.
-  # saveRDS(cs1[[smpl]],file.path(cycif_obj_dir,"dna_filtered",paste0(smpl,".rds")))
+  # saveRDS(cs1[[smpl]],file.path(obj_dir1,"dna_filtered",paste0(smpl,".rds")))
 }
 
 ```
@@ -160,7 +168,7 @@ for(smpl in smpls){
 ```{r available_cells_slide}
 # for(smpl in smpls){
 #   fn <- paste0("used_cells_",smpl,"_v1_082223.png")
-#   png(file.path(cycif_fig_dir,"pre_available_cells",fn),width=1500,height=1500)
+#   png(file.path(fig_dir1,"pre_available_cells",fn),width=1500,height=1500)
 #   ttl1 <- paste0(smpl," (available cells)")
 #   plotAvailCellOnSlide(cs1[[smpl]],main=ttl1,mfrow=c(4,3),
 #                        legend.cex=4,cex.main=4,cex.title=4)
@@ -173,7 +181,7 @@ for(smpl in smpls){
 ```{r fig_dnaFilter}
 for(smpl in smpls){
   fn <- paste0("dnaFilter_",smpl,"_v2.pdf")
-  pdf(file.path(cycif_fig_dir,"prep_dna-filter",fn),width=7,height=7)
+  pdf(file.path(fig_dir1,"prep_dna-filter",fn),width=7,height=7)
   dnaFilter(cs1[[smpl]],show.only=T)
   dev.off()
 }  
@@ -211,7 +219,7 @@ for(smpl in smpls){
 }
 
 if(0){
-  saveRDS(abs,file.path(cycif_obj_dir,"gates","abs_101223.rds"))
+  saveRDS(abs,file.path(obj_dir1,"gates","abs_101223.rds"))
 }
 ```
 
@@ -238,7 +246,7 @@ ctype.1 <- ctype[,names(ctype) %in% c("Parent","Child",abs_list(cs1)$ab)]
 cstate.1 <-cstate[ctype.1$Child,names(cstate) %in% abs_list(cs1)$ab]
 
 ##
-pdf(file.path(cycif_fig_dir,"prep_abs_summary","ab_graph_cyc6.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"prep_abs_summary","ab_graph_cyc6.pdf"),width=7,height=7)
 par(mar=c(0,0,3,0))
 ct.graph <- CellTypeGraph(ctype.1,plot=T,main='Cell type definition',with.hierarchy=TRUE)
 dev.off()
@@ -250,7 +258,7 @@ dev.off()
 if(0){
   source(file.path(cycif_src_dir,"compile_gates_101223.r"))
 }else{
-  gates <- readRDS(file.path(cycif_obj_dir,"gates","gates_101223.rds")) # 120122,122822,123122  
+  gates <- readRDS(file.path(obj_dir1,"gates","gates_101223.rds")) # 120122,122822,123122  
 }
 
 if(0){
@@ -287,10 +295,10 @@ for(smpl in names(cs1)){
 }
 
 if(0){ # save before changing the sample names
-  saveRDS(cs1,file=file.path(cycif_obj_dir,"cs1_cts_original_ids_101223.rds"))  # 27 samples
-  saveRDS(cs1,file=file.path(cycif_obj_dir,"cs1_cts_without_ellipsoid_120723.rds"))  # 27 samples
+  saveRDS(cs1,file=file.path(obj_dir1,"cs1_cts_original_ids_101223.rds"))  # 27 samples
+  saveRDS(cs1,file=file.path(obj_dir1,"cs1_cts_without_ellipsoid_120723.rds"))  # 27 samples
 }else{
-  cs1 <- readRDS(file=file.path(cycif_obj_dir,"cs1_cts_original_ids_101223.rds"))  # 27 samples
+  cs1 <- readRDS(file=file.path(obj_dir1,"cs1_cts_original_ids_101223.rds"))  # 27 samples
 }
 ```
 ## slidePlot : checking the cell types on slides ---------------------------
@@ -305,7 +313,7 @@ if(0){ # save before changing the sample names
 ```{r}
 for(smpl in smpls){
   fn <- paste0(smpl,"_v2.png")
-  png(file.path(cycif_fig_dir,"cts_expression","slides","celltypes_all",fn),width=700,height=700)
+  png(file.path(fig_dir1,"cts_expression","slides","celltypes_all",fn),width=700,height=700)
   slidePlot(cs1[[smpl]],plot_type="cell_type",ncells=1e5,uniq.cols=ct.cols)
   dev.off()
 }
@@ -314,7 +322,7 @@ for(smpl in smpls){
 ### individual cell types
 ```{r}
 for(smpl in smpls[-1]){
-  d <- file.path(cycif_fig_dir,"cts_expression","slides","celltypes_individual",smpl)
+  d <- file.path(fig_dir1,"cts_expression","slides","celltypes_individual",smpl)
   dir.create(d)
   for(ct in uniq.cts[1:14]){
     uc <- "red"
@@ -326,13 +334,12 @@ for(smpl in smpls[-1]){
     dev.off()
   }
 }
-
 ```
 
 ## Metadata - change Match sample names -----------------
 ```{r}
 ## BOT <-> LSP
-hrtme <- read.xlsx("/Users/kenichishimada/Dropbox (HMS)/_projects_/B06 03 HR-APM/cycif/example/data/CyCIF_HRTME_ANALYSISTRACKING.xlsx",1)
+hrtme <- read.xlsx(file.path(cycif_data_dir,"CyCIF_HRTME_ANALYSISTRACKING.xlsx"),1)
 
 lsp2bot <- hrtme[1:2] %>%
   rename(lspid = `LSP.ID.#`) %>%
@@ -348,7 +355,7 @@ names(bot.cycif) <- hrtme$`LSP.ID.#`
 table(names(cs1) %in% names(bot.cycif)) ## all TRUE
 
 ## BOT <-> TXN: ERS-APMTC scores
-df.gs <- readRDS("/Users/kenichishimada/Dropbox (HMS)/_projects_/B06 03 HR-APM/manuscript/Rdata/11_dfbcc_txn/df_pcs_mod_activity_v3.rds")
+df.gs <- readRDS(file.path(obj_dir,"DFBCC_txn","dfbcc_bulk_mod_activity.rds"))
 df.gs1 <- df.gs %>%
   arrange(desc(ERS)) %>%
   dplyr::rename(id="new") %>%
@@ -392,17 +399,72 @@ df.gs1 <- pData(cs1) %>% arrange(as.numeric(sub("df","",id)))
 pData(cs1) <- df.gs1
 ```
 
-### <<Save `cs1` - after identifying `cell types`>>
+## Module expression `df.gs`
+```{r}
+# cor(m,m) # column-wise comparison
+df.gs.1 <- pData(cs1) %>% select(1,3:6)
+rownames(df.gs.1) <- names(cs1)
+
+df.gs <- df.gs.1[-1]
+uniq.mods <- names(df.gs)
+```
+
+## Save `cs1` - after identifying `cell types`
 ```{r define cell types} 
 if(0){
-  # saveRDS(cs1,file=file.path(cycif_obj_dir,"cs1_cts_101223.rds"))  # 28 samples
-  # saveRDS(cs1,file=file.path(cycif_obj_dir,"cs1_cts_wo_ellipsoid_101223.rds"))  # 28 samples
-  saveRDS(cs1,file=file.path(cycif_obj_dir,"cs1_cts_102624.rds"))  # 28 samples
-  
+  saveRDS(cs1,file=file.path(obj_dir1,"cs.rds"))  # 28 samples
 }else{
-  # cs0 <- readRDS(file=file.path(cycif_obj_dir,"cs1_cts_101223.rds"))
-  cs1 <- readRDS(file=file.path(cycif_obj_dir,"cs1_cts_102624.rds"))
+  cs1 <- readRDS(file=file.path(obj_dir1,"cs.rds"))
 }
+```
+
+
+## Cell type frequency
+
+### compute cell type frequency
+```{r}
+nsh <- cellTypeFrequency(cs1,simple=TRUE)
+nsh1 <- t(nsh) %>% as.data.frame() %>% rownames_to_column("id")
+uniq.cts <- names(nsh)[-1]
+```
+
+### [Fig 4C] cell type frequency
+```{r}
+pdf(file.path(fig_dir1,"cts","all_celltypes_sorted.pdf"),width=9,height=7)
+par(mar=c(5,5,4,10))
+barplot(nsh[14:1,],col=rev(ct.cols),border=FALSE,las=2,main="Cell type frequency")
+legend(par()$usr[2],par()$usr[4],legend=names(ct.cols),fill=ct.cols,xpd=TRUE,border = "white",cex=.8)
+dev.off()
+```
+
+### [Fig 4D] correlation between cell type frequency
+```{r}
+cor.cts <- cor(t(nsh))
+pdf(file.path(fig_dir1,"cts","cts_heatmap.pdf"),width=7,height=7)
+heatmap3(cor.cts,balanceCol=TRUE,scale="none",margins=c(10,10),
+         main="Cell type frequency correlation (CyCIF - bulk)")
+dev.off()
+```
+
+### [Fig 4E] correlation between cell type frequency and module activity
+```{r}
+cor.mat <- cor(t(nsh),df.gs)
+
+## barplot for each module
+rng <- c(-1,1)*.85 #(cor.mat)
+for(i in 1:4){
+  this.cor <- sort(cor.mat[,i])
+  pdf(file.path(fig_dir1,"cts",paste0("module",i,".pdf")),width=4,height=7)
+  par(mar=c(5,10,4,1))
+  barplot(this.cor,col=ct.cols[names(this.cor)],horiz=TRUE,main=names(df.gs)[i],las=1,xlim=rng)
+  abline(v=c(.4,-.4),lty=2)
+  box()
+  dev.off()
+}
+```
+
+```{r}
+saveRDS(nsh,file=file.path(obj_dir1,"nstat_cycif.rds"))
 ```
 
 

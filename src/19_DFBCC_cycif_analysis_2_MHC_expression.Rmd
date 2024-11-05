@@ -1,5 +1,5 @@
 ---
-title: "ERS-APM/TC analysis part I (cell type frequency analysis)"
+title: "ERS-APM/TC analysis part II"
 author: "Kenichi Shimada"
 date: '2023-07-30'
 # output: 
@@ -10,14 +10,6 @@ date: '2023-07-30'
 # ERS-APM/TC CyCIF analysis: part I
 
 ## Initial setup ---------------------------
-
-### Re-install CycifAnalyzeR after updating the package
-```{r reinstall_CyCIF_ library,eval=F}
- suppressPackageStartupMessages({
-  devtools::install_github("kenichi-shimada/CycifAnalyzeR",force=TRUE)
-  # devtools::load_all("/Users/kenichishimada/Dropbox (HMS)/_projects_/B00 CyCIF/CycifAnalyzeR")
-})
-```
 
 ### Load packages
 
@@ -38,11 +30,19 @@ suppressPackageStartupMessages({
   library(data.table)
   library(CycifAnalyzeR)
 })
+source(file.path(src_dir,"utils","cycif_utils.R"))
+```
+### Set up paths
+```{r}
+obj_dir1 <- file.path(obj_dir,"DFBCC_cycif")
+fig_dir1 <- file.path(fig_dir,"19_DFBCC_cycif_analysis_2")
+# dir.creates(fig_dir1,"distance")
+# dir.creates(fig_dir1,"cn_frnn")
 ```
 
-### Load `cs1`
+### Load `cs1` (CycifStack object)
 ```{r define cell types} 
-cs1 <- readRDS(file=file.path(cycif_obj_dir,"cs1_cts_102624.rds"))
+cs1 <- readRDS(file=file.path(obj_dir1,"cs.rds"))
 ```
 
 ### Module activity `df.gs`
@@ -54,315 +54,41 @@ df.gs <- pData(cs1) %>%
 rownames(df.gs) <- names(cs1)
 ```
 
-## Make key components in spatial analysis: `lst.dists`, `lst.frnn`
-
-### `lst.dists`: define tumor border and compute distance from tumor border for each cell
-
+### Load more objects
 ```{r}
-## instead of just cancer cell intrinsic, we should do cell-unbiased analysis
-r_um <- 20 # um (radius of the microenvironment)
-r <- round(r_um/0.65,2) # convert from um to pixel
-k <- 20
+df.cn.t <- readRDS(file.path(obj_dir1,"cn","CN_anlaysis_data.rds")) %>%
+  mutate(n.t.48 = as.integer((CD4T_Treg + CD4T_nonTreg + CD8T) * n)) %>% # CD4T_nonTreg and CD8T
+  mutate(n.t.all = as.integer((CD4T_Treg + CD4T_nonTreg+ CD8T + T_other) * n)) # all T
 
-dth <- distAdjacentCells(cs1)
-
-nms <- names(cs1)
-
-this.cts <- cell_types(cs1)
-used.cts <- levels(this.cts$cell_types)[1:12] # remove Imm_other, all_other, outOfROI
-  
-
-if(0){
-  cts.all <- table(this.cts)[,used.cts] 
-  
-  ns <- rowSums(cts.all)
-  n <- round(quantile(ns,0.1)) # only looking at 10 percentile of the nCells.
-  
-  for(nm in nms){
-    cat(nm,"..\n")
-    x1 <- cs1[[nm]]
-    obj <- defineTumorStroma(x1, n.cores = 7, dth=dth, concavity = 0.8, plot = FALSE)
-    saveRDS(obj,file.path(cycif_obj_dir,"distance",paste0("defTS_",nm,".rds")))
-  }
-}else{
-  lst.dists  <- list()
-  for(nm in nms){
-    # x1 <- cs1[[nm]]
-    # obj <- defineTumorStroma(x1, n.cores = 7, dth=dth, concavity = 0.8, plot = FALSE)
-    # saveRDS(obj,file.path(cycif_obj_dir,"distance",paste0("defTS_",nm,".rds")))
-    lst.dists[[nm]] <- readRDS(file.path(cycif_obj_dir,"distance",paste0("defTS_",nm,".rds")))
-  }
-}
-```
-
-### `lst.frnn` - computeCN()
-```{r}
-n.sampling <- 10000
-if(0){
-  for(nm in nms){
-    cat(nm,"\t")
-    x <- cs1[[nm]]
-    obj <- computeCN(x,type="frnn",
-                     r_um=20,
-                     used.cts = used.cts,
-                     n.sampling=n.sampling,
-                     seed=123)
-    saveRDS(obj,file.path(cycif_obj_dir,"cn_frnn",paste0("cn_frnn_",nm,".rds")))
-  }
-}else{
-  lst.frnn <- list()
-  for(nm in nms){
-    lst.frnn[[nm]] <- readRDS(file.path(cycif_obj_dir,"cn_frnn",paste0("cn_frnn_",nm,".rds")))
-  }
-}
-```
-
-## Cell neighborhood (CN) clustering
-
-### *****k-means clustering*****
-```{r}
-# [[[check these dim/length here]]]
-## distance from tumor border
-cts <- cell_types(cs1)
-
-is.used <- lapply(nms,function(nm){ ## is the cell types among used.cts
-  ct <- as.character(cts$cell_types[cts$sample==nm])
-  ct[is.na(ct)] <- "NA"
-  ct <- ct[ct != "outOfROI"]
-  is.used <- ct %in% used.cts
-  return(is.used)
-})
-names(is.used) <- nms
-
-lst.dist.ts <- lapply(nms,function(nm){ 
-  d <- lst.dists[[nm]]$dist$dist
-  d.used <- d[is.used[[nm]]]
-  return(d.used)
-})
-
-### from clusters
-
-## frnn
-lst.selected <- lapply(lst.frnn,function(x)x@is.selected) ## is the cells (used.cts == TRUE) positive for clustering
-lst.frnn.count <- lapply(lst.frnn,function(x)x@rcn.count[,used.cts])
-lst.frnn.bulk.exp <- lapply(lst.frnn,function(x){
-  tmp <- x@exp.per.cn
-  o <- order(tmp$cell_id)
-  tmp <- tmp[o,]
-  return(tmp)
-})
-lst.frnn.ct.exp <- lapply(lst.frnn,function(x)x@exp.per.ct.cn)
+cluster_assignments <- readRDS(file.path(obj_dir1,"cn","cluster_assignments_kmeans_all.rds"))
 
 ```
 
-### `is.ge10` - cells with at least 10 cells in the neighborhood
-```{r}
-## combine
-is.selected <- unlist(lst.selected) # this is if the qualified cells (is.used == TRUE) are selected for clustering among
-
-n.smpls <- sapply(is.used,sum)
-smpls <- rep(nms,n.smpls)
-frnn.rcn <- do.call(rbind,lst.frnn.count) ## only within used.cts
-frnn.exp <- do.call(rbind,lst.frnn.bulk.exp)[,c(1:3,5,8)]
-# frnn.ct.exp <- do.call(rbind,lst.frnn.ct.exp) ## this is not good, as per cluster is not unique
-
-d <- unlist(lst.dist.ts) 
-
-frnn.rcn.n <- rowSums(frnn.rcn)
-
-is.ge10 <- frnn.rcn.n >= 10
-```
+### cell state markers and expressing cell types - `lst.cst.def`
 
 ```{r}
-## ct frequency per CN (# cells ≥ 10) ## 3266700 cells
-frnn.freq <- (frnn.rcn/(frnn.rcn.n[row(frnn.rcn)]))
-frnn.freq.sele <- frnn.freq[is.selected,]
-frnn.freq.ge10 <- frnn.freq[is.ge10,]
-```
+used.abs <- c("ERa","HLAABC","HLADPB1","PD1")
 
-#### [Fig.S] number of cells in each cell neighborhood
-
-```{r}
-if(1){
-  pdf(file.path(cycif_fig_dir,"cn","n_cells_dist.pdf"),width=7,height=7)
-  par(mar=c(5,5,3,3))
-  hist(frnn.rcn.n,breaks=60,freq=F,border=NA,col="grey",
-       main="number of cells in cell neighborhood\n(all samples)",
-       xlab="# cells in cell neighborhood")
-  abline(v=10,col=1)
-  dev.off()
-}
-```
-
-
-### isometric log-ratio transformation of compositional data
-```{r}
-ilr.freq <- ilr(frnn.freq+1e-5)
-ilr.freq.ge10 <- ilr.freq[is.ge10,]
-```
-
-### PCA - this include all the samples, because the clustering is based on the cell type frequency
-```{r}
-# frnn
-smpls.ge10 <- factor(smpls[is.ge10],levels=nms)
-
-n.smpls <- table(smpls)
-n.smpls.ge10 <- table(smpls.ge10)
-
-n.draw <- 1e4
-
-set.seed(12345)
-lst.selected.ge10 <- lapply(nms,function(nm){
-  # n.true <- min(n.draw,n.smpls.ge10[nm])
-  n.true <- min(n.draw,n.smpls.ge10[nm])
-  n.false <- n.smpls.ge10[nm] - n.true
-  idx <- rep(c(TRUE,FALSE),c(n.true,n.false))
-  idx <- sample(idx)
-  return(idx)
-})
-is.selected.ge10 <- unlist(lst.selected.ge10)
-
-ilr.freq.ge10 <- ilr.freq[is.ge10,]
-```
-
-```{r}
-pca_result <- prcomp(ilr.freq.ge10[is.selected.ge10], 
-                     center = TRUE,
-                     scale=FALSE) 
-
-# checking to make sure rotation works!!
-ilr.freq.ctr <- apply(ilr.freq,2,#[is.selected.ge10,], 2, 
-        function(x) x - mean(x))
-
-pca_all <- ilr.freq.ctr %*% pca_result$rotation
-
-
-##
-var_explained <- pca_result$sdev^2 / sum(pca_result$sdev^2)
-cum_var_explained <- cumsum(var_explained)
-num_pc <- which(cum_var_explained >= 0.90)[1] # Number of PCs covering at least 90% variance = 8
-
-if(0){
-  plot(cum_var_explained, 
-       xlab = "Principal Component", 
-       ylab = "Cumulative Proportion of Variance Explained", type = "b")
-  # abline(v=num_pc,col=2)
-  abline(h=0.90, col=2)
-}
-
-# Step 2: Use the first few principal components for K-means
-pca_data_sele <- pca_result$x[, 1:num_pc]
-pca_data_all <- pca_all[, 1:num_pc]
-
-set.seed(12345)
-k <- 100
-
-system.time(
-  km <- kmeans(pca_data_sele, centers = k, iter.max = 20, nstart = 25)
-)
-
-if(0){
-  # compute distance betwen pca_data and centers -> straightforward but slow
-  cluster_assignments <- apply(pca_data_all,1,function(x){
-    dists <- apply(km$centers,1,function(y)sum((x-y)^2))
-    return(which.min(dists))
-  })
-}else{
-  # faster calculation of extrapolating kmeans
-  sum_squares_x <- rowSums(pca_data_all^2)
-  sum_squares_y <- rowSums(km$centers^2)
-  cross_term <- -2 * pca_data_all %*% t(km$centers)
-  squared_dists <- 
-    outer(sum_squares_x, sum_squares_y, "+") + cross_term
-  cluster_assignments0 <- cluster_assignments <- 
-    max.col(-squared_dists, ties.method = "first")
-
-  freq.clusts <- table(cluster_assignments)/length(cluster_assignments)
-}
-
-# sorted.clusts <- names(sort(table(cluster_assignments),decreasing=T))
-# cluster_assignments1 <- as.numeric(factor(cluster_assignments,levels=as.integer(sorted.clusts)))
-```
-
-### Compile `clfreq`  after `df`
-
-```{r}
-## correlation with module.activity
-smpls1 <- factor(smpls,levels=nms)
-cltab0 <- table(smpls1,cluster_assignments0)
-cltab0 <- array(cltab0,dim(cltab0))
-
-# convert table to matrix
-clfreq0 <- cltab0/array(rowSums(cltab0)[row(cltab0)],dim(cltab0))
-rownames(clfreq0) <- rownames(cltab0) <- nms
-colnames(clfreq0) <- colnames(cltab0) <- seq(ncol(cltab0))
-
-cor.sp0 <- cor(df.gs[,"ERS"],clfreq0,method="spearman")
-```
-
-### Reorder of clusters
-```{r}
-o <- order(cor.sp0,decreasing=T)  
-cluster_assignments <- as.numeric(factor(cluster_assignments0,levels=o))
-
-# barplot(table(cluster_assignments))
-```
-
-#### save `cluster_assignments`
-```{r}
-if(0){
-  saveRDS(cluster_assignments,
-          file.path(cycif_obj_dir,"cluster_assignments_kmeans_all_v1_102624.rds"))
-}else{
-  cluster_assignments <- readRDS(file.path(cycif_obj_dir,"cluster_assignments_kmeans_all_v1_102624.rds"))
-}
-```
-
-
-### `df`: combine all the information about CNs for further analysis
-```{r}
-# smpl: sample ID
-# knn.rcn: knn.rcn.cell-count
-# rad: radius of cell neighborhood
-# d: distance to tumor border
-# exp.cn: expression per cell neighborhood
-# cluster_assignments: cluster assignments
-
+### `lst.cst.def`
 cts <- cell_types(cs1)
 used.cts <- levels(cts$cell_types)[1:12]
-is.used.cts <- cts$cell_types %in% used.cts
 
-used.abs <- c("PD1","HLAABC","HLADPB1","ERa")#,"pTBK1")
-k1 <- max(as.numeric(cluster_assignments))
-xys.all <- do.call(rbind,cyApply(cs1,xys))
-xys.sele <- xys.all[is.used.cts,]
+cst.def <- cs1@cell_types$default@cell_state_def#[-1]
+cst.def$PD1[7:8] <- NA
 
-cts.sele <- cts %>%
-  filter(is.used.cts) %>%
-  mutate(cell_id = unlist(sapply(nms,function(nm)seq(sum(sample==nm))))) %>%
-  select(-sample)
+lst.cst.def <- apply(cst.def[used.abs],2,function(x){
+  this.cts <- rownames(cst.def)[!is.na(x) & x =="CAN"]
+  this.cts <- intersect(used.cts,this.cts)
+  return(this.cts)
+})
 
-tmp1 <- data.frame(smpl=factor(smpls,levels=nms),
-                   cluster=factor(cluster_assignments,levels=(1:k1)),
-                   d=d,
-                   n=frnn.rcn.n,
-                   is.selected=is.selected)
-df.cn <- cbind(tmp1,
-            cts.sele,            
-            xys.sele,
-            frnn.freq,
-            frnn.exp[, .SD, .SDcols = used.abs])
-```
-
-### `bin_values`: binned distance
-```{r}
-bin_values <- function(x, width = 20) {
-  bin_start <- floor((x + width/2) / width) * width
-  return(bin_start)
+if(0){
+  saveRDS(lst.cst.def,file.path(obj_dir1,"lst.cst.def.rds"))
+}else{
+  lst.cst.def <- readRDS(file.path(obj_dir1,"lst.cst.def.rds"))
 }
-
-df.cn <- df.cn %>% mutate(d1=bin_values(d,width=20))
 ```
+
 ## [Fig 6] HLA and T cell relationship  --------
 
 ### [Fig 6A] scatterplot between HLAABC and HLADPB1
@@ -370,6 +96,7 @@ df.cn <- df.cn %>% mutate(d1=bin_values(d,width=20))
 n <- 1e4
 set.seed(12345)
 
+nms <- names(cs1)
 ids <- list()
 for(nm in nms){
   mh1 <- df.cn.t %>% filter(smpl == nm)
@@ -388,7 +115,7 @@ if(0){
   abline(h=100,col=2)
   idx <- max(which(xh$counts >= n.th/2))
 }else{
-  idx <- 28
+  idx <- 28 ## beyond # T cells > 28 are put together
 }
 df.cn.ts$n.t.all[df.cn.ts$n.t.all > idx] <- idx +1
 ```
@@ -398,7 +125,7 @@ cor1 <- cor(df.cn.ts$HLAABC,df.cn.ts$HLADPB1,method="spearman",use="pairwise.com
 # lm1 <- lm(HLADPB1 ~ HLAABC, data=df.cn.ts)
 
 ### HLAABC vs HLADPB1
-pdf(file.path(cycif_fig_dir,"cn_exp","scatterplot_HLAABC_HLADPB1_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"cn_exp","scatterplot_HLAABC_HLADPB1.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 smoothScatter(df.cn.ts$HLAABC,df.cn.ts$HLADPB1,
               xlab="HLA-ABC expression per CN",
@@ -433,7 +160,7 @@ uc <- sapply(brewer.pal(9,"YlGnBu")[-(1:3)],function(x)colorRampPalette(c("white
 cols <- uc[c(1:5,rep(6,33-5))]
 
 ##
-pdf(file.path(cycif_fig_dir,"cn_exp","boxplot_HLAABC_nTcells_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"cn_exp","boxplot_HLAABC_nTcells.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 xx <- boxplot(hlaabc.ts,pch=NA,ylim=ylim1,
         xlab="# T cells per CN",ylab="HLA-ABC expression per CN",
@@ -444,7 +171,7 @@ axis(1,at=seq(0,50,5)+1,labels=seq(0,50,5))
 dev.off()
 
 ##
-pdf(file.path(cycif_fig_dir,"cn_exp","boxplot_HLADPB1_nTcells_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"cn_exp","boxplot_HLADPB1_nTcells.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 xx <- boxplot(hladpb1.ts,pch=NA,ylim=ylim2,
         xlab="# T cells per CN",ylab="HLA-DPB1 expression per CN",
@@ -461,7 +188,7 @@ n <- 1e4
 set.seed(12345)
 ids <- list()
 for(nm in nms){
-  mh1 <- df.cn %>% filter(smpl == nm)
+  mh1 <- df.cn.t %>% filter(smpl == nm)
   idx <- sample(nrow(mh1),min(n,nrow(mh1)),replace=FALSE)
   ids[[nm]] <- seq(nrow(mh1)) %in% idx
 }
@@ -476,7 +203,7 @@ is.na <- is.na(df.cn.ts$HLAABC) | is.na(df.cn.ts$HLADPB1)
 df.cn.hla <- df.cn.ts[!is.na,c("HLAABC","HLADPB1")]
 mean.hla <- apply(df.cn.hla,2,mean)
 
-pdf(file.path(cycif_fig_dir,"cn_exp","scatterplot_HLAABC_HLADPB1_lm_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"cn_exp","scatterplot_HLAABC_HLADPB1_lm.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 smoothScatter(df.cn.ts$HLAABC,df.cn.ts$HLADPB1,
               xlab="HLA-ABC expression per CN",ylab="HLA-DPB1 expression per CN",
@@ -520,24 +247,15 @@ p <- ggplot(df.cn.v,aes(x=log2_diff,y=nlogpvals,label=cell_types)) +
   ggtitle("Cell types enriched in CN higher in HLA-ABC or HLA-DPB1") +
   theme_minimal()
 
-pdf(file.path(cycif_fig_dir,"cn_exp","volcano_cts_in_HLAABC_HLADPB1.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"cn_exp","volcano_cts_in_HLAABC_HLADPB1.pdf"),width=7,height=7)
 print(p)
 dev.off()
-```
-
-### save `df.cn` for further analysis
-```{r}
-if(0){
-  saveRDS(df.cn,file.path(cycif_obj_dir,"df.cn.rds"))
-}else{
-  df.cn <- readRDS(file.path(cycif_obj_dir,"df.cn.rds"))
-}
 ```
 
 ## CN clusters
 ### [Fig S10C down] heatmap of cluster frequency
 ```{r}
-cltab <- table(df.cn$smpl,df.cn$cluster)
+cltab <- table(df.cn.t$smpl,df.cn.t$cluster)
 cltab <- array(cltab,dim(cltab))
 
 # convert table to matrix
@@ -547,7 +265,7 @@ colnames(clfreq) <- colnames(cltab) <- seq(ncol(cltab))
 
 cor.sp <- cor(df.gs[,"ERS"],clfreq,method="spearman")
 
-pdf(file.path(cycif_fig_dir,"cn","clust_rel_normalized_sp.pdf"),width=12,height=7)
+pdf(file.path(fig_dir1,"cn","clust_rel_normalized_sp.pdf"),width=12,height=7)
 heatmap3(clfreq,Colv=NA,Rowv=NA,scale="col",cexCol=.3,main="cluster frequency",
          col=viridis(100))
 dev.off()
@@ -561,7 +279,7 @@ n.cor.sp <- round(cor.sp/max.rng.sp*n.cols)
 cols <- colorRampPalette(rev(brewer.pal(11,"RdBu")))(n.cols*2+1)
 names(cols) <- seq(-n.cols,n.cols)
 
-pdf(file.path(cycif_fig_dir,"cn","spearman_cor_clust_freq_vs_ers.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"cn","spearman_cor_clust_freq_vs_ers.pdf"),width=7,height=7)
 xx <- barplot(as.vector(cor.sp),col=cols[as.character(n.cor.sp)],border=NA,horiz=FALSE,space=0,
         main="Spearman correlation of cluster frequency with ERS (FRNN)")
 abline(v=sum(cor.sp>0),lty=2)
@@ -572,7 +290,7 @@ dev.off()
 
 ```{r}
 ## mean cell type frequency per cluster per cell type
-df.cn4 <- df.cn %>%
+df.cn4 <- df.cn.t %>%
   mutate(sorted_cluster=factor(cluster)) %>%
   select(sorted_cluster, !!!syms(used.cts)) %>%
   group_by(sorted_cluster) %>%
@@ -610,7 +328,7 @@ ncl <- sum(cor.sp > 0)
 
 # uniq.cols <- rev(colorRampPalette(brewer.pal(11,"RdBu"))(100))
 uniq.cols <- colorRampPalette(brewer.pal(9,"YlGnBu"))(100)
-pdf(file.path(cycif_fig_dir,"cn","heatmap3_ctfreq_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"cn","heatmap3_ctfreq.pdf"),width=7,height=7)
 hm <- heatmap3(t(df.cn4),
          scale="none",balanceColor=F,Colv=NA,#Rowv=NA,
          col=uniq.cols,
@@ -623,10 +341,10 @@ dev.off()
 
 ### [Fig 6H-down] Distance from tumor border for each CN cluster
 ```{r}
-med.dist <- (df.cn %>% group_by(cluster) %>% summarize(median=median(d,na.rm=T)))
+med.dist <- (df.cn.t %>% group_by(cluster) %>% summarize(median=median(d,na.rm=T)))
 o.dist <- order(med.dist$median,decreasing=F)
 
-df.cn1 <- df.cn %>%
+df.cn1 <- df.cn.t %>%
   mutate(median_distance=factor(cluster,levels=o.dist)) # 94
   
 p <- ggplot(df.cn1,aes(x=cluster,y=d)) +
@@ -638,38 +356,12 @@ p <- ggplot(df.cn1,aes(x=cluster,y=d)) +
   ylim(-300,750) +
   scale_fill_viridis_d()
 
-pdf(file.path(cycif_fig_dir,"cn","boxplot_cluster_distance_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"cn","boxplot_cluster_distance.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
 
-### `lst.cst.def`
 
-```{r}
-used.abs <- c("ERa","HLAABC","HLADPB1","PD1")
-
-### `lst.cst.def`
-cts <- cell_types(cs1)
-used.cts <- levels(cts$cell_types)[1:12]
-
-cst.def <- cs1@cell_types$default@cell_state_def#[-1]
-cst.def$PD1[7:8] <- NA
-
-lst.cst.def <- apply(cst.def[used.abs],2,function(x){
-  this.cts <- rownames(cst.def)[!is.na(x) & x =="CAN"]
-  this.cts <- intersect(used.cts,this.cts)
-  return(this.cts)
-})
-```
-
-### save `lst.cst.def` for further analysis
-```{r}
-if(0){
-  saveRDS(lst.cst.def,file.path(cycif_obj_dir,"lst.cst.def.rds"))
-}else{
-  lst.cst.def <- readRDS(file.path(cycif_obj_dir,"lst.cst.def.rds"))
-}
-```
 
 ## Per-sample analysis
 ### [Fig 6C] Compute mean per sample
@@ -681,7 +373,7 @@ mats <- list()
 
 for(ab in used.abs){
   this.cts <- lst.cst.def[[ab]]
-  df.cn2 <- df.cn %>%
+  df.cn2 <- df.cn.t %>%
     select(smpl,cell_types,!!sym(ab)) %>%
     group_by(smpl,cell_types) %>%
     summarise(sum_ab=mean(!!sym(ab),na.rm=T),.groups="drop") %>%
@@ -698,7 +390,7 @@ for(ab in used.abs){
   
   cols <- colorRampPalette(rev(brewer.pal(11,"RdBu")))(100)
 
-  pdf(file.path(cycif_fig_dir,"per_smpl",paste0("mean_exp_smpl_",ab,"_v2.pdf")),width=7,height=7)
+  pdf(file.path(fig_dir1,"exp_per_smpl",paste0("mean_exp_smpl_",ab,".pdf")),width=7,height=7)
   h3(mat,Colv=NA,Rowv=NA,col=cols,scale="none",main=ab,RowSideColors=rep(csc[ab],nrow(mat)))
   dev.off()
 }
@@ -718,102 +410,96 @@ mats1 <- t(do.call(rbind,lst.mats))
 sp.smpl <- cor(mats1,method="sp",use="pairwise.complete.obs")
 
 cscs <- rep(csc,sapply(lst.cst.def,length))
-pdf(file.path(cycif_fig_dir,"per_smpl","cor_sp_mean_exp_smpl.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"exp_per_smpl","cor_sp_mean_exp_smpl.pdf"),width=7,height=7)
 h3(sp.smpl,scale="none",main="SCC",balanceColor=TRUE,margins=c(10,10),
    RowSideColors=cscs,ColSideColors=cscs)
 dev.off()
 ```
 
 
-## within vs between-sample variation
 ## within vs between-sample variation  --------
-
 
 ### [Fig S10E,F] model selection: AIC, BIC, R-squared
 ```{r}
-if(0){
-  r.sq <- AICs <- BICs <- list()
-  for(ab1 in c("ERa","HLAABC","HLADPB1","PD1")){
-    cat(ab1,"..\n")
-    this.cts <- lst.cst.def[[ab1]]
-    df.cn.ab <- df.cn %>%  
-      filter(cell_types %in% this.cts & !is.na(!!sym(ab1))) %>%
-      mutate(cell_types = factor(cell_types,levels=this.cts)) %>%
-      mutate(smpl_rand = factor(sample(smpl),levels=nms)) %>%
-      # select(smpl,smpl_rand,cluster,cell_types,!!sym(ab1))
-      select(smpl,cluster,cell_types,!!sym(ab1))
-    names(df.cn.ab)[4] <- "ab"
-    if(nlevels(df.cn.ab$cell_types)==1){
-      model.s <- lm(ab ~ smpl, data = df.cn.ab)
-      model.c <- lm(ab ~ cluster, data = df.cn.ab)
-      model.sc <- lm(ab ~ cluster + smpl, data = df.cn.ab)
-    }else{
-      model.s <- lm(ab ~ smpl + cell_types, data = df.cn.ab)
-      model.c <- lm(ab ~ cluster + cell_types, data = df.cn.ab)
-      model.sc <- lm(ab ~ cluster + smpl + cell_types, data = df.cn.ab)
-    }
-    AIC1 <- AIC(model.s)
-    AIC2 <- AIC(model.c)
-    AIC3 <- AIC(model.sc)
-  
-    AICs[[ab1]] <- c(AIC1, AIC2, AIC3)
-  
-    BIC1 <- BIC(model.s)
-    BIC2 <- BIC(model.c)
-    BIC3 <- BIC(model.sc)
-    BICs[[ab1]] <- c(BIC1, BIC2, BIC3)
-    
-    r1 <- summary(model.s)$r.squared
-    r2 <- summary(model.c)$r.squared
-    r3 <- summary(model.sc)$r.squared
-    r.sq[[ab1]] <- c(r1,r2,r3)
+r.sq <- AICs <- BICs <- list()
+for(ab1 in c("ERa","HLAABC","HLADPB1","PD1")){
+  cat(ab1,"..\n")
+  this.cts <- lst.cst.def[[ab1]]
+  df.cn.ab <- df.cn.t %>%  
+    filter(cell_types %in% this.cts & !is.na(!!sym(ab1))) %>%
+    mutate(cell_types = factor(cell_types,levels=this.cts)) %>%
+    mutate(smpl_rand = factor(sample(smpl),levels=nms)) %>%
+    # select(smpl,smpl_rand,cluster,cell_types,!!sym(ab1))
+    select(smpl,cluster,cell_types,!!sym(ab1))
+  names(df.cn.ab)[4] <- "ab"
+  if(nlevels(df.cn.ab$cell_types)==1){
+    model.s <- lm(ab ~ smpl, data = df.cn.ab)
+    model.c <- lm(ab ~ cluster, data = df.cn.ab)
+    model.sc <- lm(ab ~ cluster + smpl, data = df.cn.ab)
+  }else{
+    model.s <- lm(ab ~ smpl + cell_types, data = df.cn.ab)
+    model.c <- lm(ab ~ cluster + cell_types, data = df.cn.ab)
+    model.sc <- lm(ab ~ cluster + smpl + cell_types, data = df.cn.ab)
   }
-  
-  rsq <- do.call(rbind,r.sq)[,c(2,1,3)]
-  colnames(rsq) <- c("c","s","sc")
-  
-  df.cn.r2 <- data.frame(
-    r.squared=as.vector(rsq),
-    model=factor(rep(c("c","s","sc"),each=4),levels=c("c","s","sc")),
-    # ab=rep(c("ERa","HLAABC","HLADPB1","pTBK1","PD1"),3)
-    ab=rep(c("ERa","HLAABC","HLADPB1","PD1"),3))
-  
-  p.val12 <- t.test(rsq[,"c"],rsq[,"s"],two.sided=TRUE,paired=TRUE)$p.value
-  p.val23 <- t.test(rsq[,"s"],rsq[,"sc"],two.sided=TRUE,paired=TRUE)$p.value
-  p.val13 <- t.test(rsq[,"c"],rsq[,"sc"],two.sided=TRUE,paired=TRUE)$p.value
-  
-  ## violin plot with ggplot, with points for each protein connected with lines
-  p <- ggplot(df.cn.r2,aes(x=model,y=r.squared,fill=model)) + 
-    geom_violin() + 
-    geom_point(aes(group=ab)) +
-    geom_line(aes(group=ab)) +
-    theme_minimal() + 
-    theme(axis.text.x = element_text(hjust = 1),
-          legend.position = "none") + 
-    labs(title="R-squared of three linear models",x="",y="R-squared") + 
-    scale_fill_brewer(palette="Set1")
-  
-  ## add p.vals
-  p <- p +
-    annotate("text",x=1.5,y=.8,label=paste0("p=",round(p.val12,4)),size=3) +
-    annotate("text",x=2.5,y=.8,label=paste0("p=",round(p.val23,4)),size=3) +
-    annotate("text",x=2,y=.9,label=paste0("p=",round(p.val13,4)),size=3)
-  
-  pdf(file.path(cycif_fig_dir,"regression","r2_models_v3.pdf"),width=2.5,height=7)
-  print(p)
-  dev.off()
+  AIC1 <- AIC(model.s)
+  AIC2 <- AIC(model.c)
+  AIC3 <- AIC(model.sc)
 
-  aics <- do.call(rbind,AICs)
-  bics <- do.call(rbind,BICs)  
-  sapply(AICs,function(a)which.min(a))
-  sapply(BICs,function(b)which.min(b))  
-  save(AICs,BICs,file=file.path(cycif_obj_dir,"model_selection_exp_cluster_v3.rda"))
-  aic.bic <- round(cbind(aics,bics))
-  colnames(aic.bic) <- paste0(rep(c("AIC","BIC"),each=3),".",rep(c("s","c","sc"),2))
-  write.csv(aic.bic,file=file.path(cycif_obj_dir,"model_selection_exp_aic_bic_v3.csv"))
-}else{
-  load(file=file.path(cycif_obj_dir,"model_selection_exp_cluster_v3.rda")) # AICs,BICs,lmers
+  AICs[[ab1]] <- c(AIC1, AIC2, AIC3)
+
+  BIC1 <- BIC(model.s)
+  BIC2 <- BIC(model.c)
+  BIC3 <- BIC(model.sc)
+  BICs[[ab1]] <- c(BIC1, BIC2, BIC3)
+  
+  r1 <- summary(model.s)$r.squared
+  r2 <- summary(model.c)$r.squared
+  r3 <- summary(model.sc)$r.squared
+  r.sq[[ab1]] <- c(r1,r2,r3)
 }
+
+rsq <- do.call(rbind,r.sq)[,c(2,1,3)]
+colnames(rsq) <- c("c","s","sc")
+
+df.cn.r2 <- data.frame(
+  r.squared=as.vector(rsq),
+  model=factor(rep(c("c","s","sc"),each=4),levels=c("c","s","sc")),
+  # ab=rep(c("ERa","HLAABC","HLADPB1","pTBK1","PD1"),3)
+  ab=rep(c("ERa","HLAABC","HLADPB1","PD1"),3))
+
+p.val12 <- t.test(rsq[,"c"],rsq[,"s"],two.sided=TRUE,paired=TRUE)$p.value
+p.val23 <- t.test(rsq[,"s"],rsq[,"sc"],two.sided=TRUE,paired=TRUE)$p.value
+p.val13 <- t.test(rsq[,"c"],rsq[,"sc"],two.sided=TRUE,paired=TRUE)$p.value
+
+## violin plot with ggplot, with points for each protein connected with lines
+p <- ggplot(df.cn.r2,aes(x=model,y=r.squared,fill=model)) + 
+  geom_violin() + 
+  geom_point(aes(group=ab)) +
+  geom_line(aes(group=ab)) +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(hjust = 1),
+        legend.position = "none") + 
+  labs(title="R-squared of three linear models",x="",y="R-squared") + 
+  scale_fill_brewer(palette="Set1")
+
+## add p.vals
+p <- p +
+  annotate("text",x=1.5,y=.8,label=paste0("p=",round(p.val12,4)),size=3) +
+  annotate("text",x=2.5,y=.8,label=paste0("p=",round(p.val23,4)),size=3) +
+  annotate("text",x=2,y=.9,label=paste0("p=",round(p.val13,4)),size=3)
+
+pdf(file.path(fig_dir1,"regression","r2_models.pdf"),width=2.5,height=7)
+print(p)
+dev.off()
+
+aics <- do.call(rbind,AICs)
+bics <- do.call(rbind,BICs)  
+sapply(AICs,function(a)which.min(a))
+sapply(BICs,function(b)which.min(b))  
+save(AICs,BICs,file=file.path(obj_dir1,"model_selection_exp_cluster.rda"))
+aic.bic <- round(cbind(aics,bics))
+colnames(aic.bic) <- paste0(rep(c("AIC","BIC"),each=3),".",rep(c("s","c","sc"),2))
+write.csv(aic.bic,file=file.path(obj_dir1,"model_selection_exp_aic_bic.csv"))
 ```
 
 ## ERa/HLAABC/HLADPB1 expression per distance  --------
@@ -828,7 +514,7 @@ cts <- cell_types(cs1)
 used.cts <- levels(cts$cell_types)[1:12]
 
 cst.def <- cs1@cell_types$default@cell_state_def#[-1]
-# cst.def$PD1[7:8] <- NA
+cst.def$PD1[7:8] <- NA
 
 lst.cst.def <- apply(cst.def[used.abs],2,function(x){
   this.cts <- rownames(cst.def)[!is.na(x) & x =="CAN"]
@@ -872,14 +558,14 @@ p.er1 <- ggplot(m.era,aes(x=d1,y=expression,color=nT)) +
   xlab("Distance from tumor border  (µm)") +
   ylab("mean ERa expression per CN")
 
-pdf(file.path(cycif_fig_dir,"cn_exp","ERa expression per distance_v2.pdf"),width=5,height=5)
+pdf(file.path(fig_dir1,"exp_ts_axis","ERa expression per distance.pdf"),width=5,height=5)
 print(p.er1)
 dev.off()
 ```
 #### [Fig S10A] ERa - difference between tumor/stroma
 
 ```{r}
-## mean between 100-200um
+## mean between 150-300um
 e300 <- m.era %>% 
   mutate(is.stroma = d1 > 0) %>%
   mutate(is.stroma = c("tumor core","stroma")[is.stroma+1]) %>%
@@ -919,12 +605,12 @@ p.er2 <- ggplot(e300,aes(x=nT,y=expression)) +
   geom_smooth(method="lm",aes(group=is.stroma,color=is.stroma))+
   geom_text(data=p.lm,aes(x=x,y=y,label=text,color=is.stroma)) +
   theme_minimal() +
-  ggtitle("ERa expression in tumor core and stroma\n(100-200um from border)") +
+  ggtitle("ERa expression in tumor core and stroma\n(150-300um from border)") +
   xlab("# of T cells per CN") +
   ylab("ERa Expression") + 
   theme(legend.position="none")
 
-pdf(file.path(cycif_fig_dir,"cn_exp","ERa vs nT.pdf"),width=5,height=5)
+pdf(file.path(fig_dir1,"exp_ts_axis","ERa vs nT.pdf"),width=5,height=5)
 print(p.er2)
 dev.off()
 ```
@@ -962,7 +648,7 @@ p.hla1 <- ggplot(m.hla1,aes(x=d1,y=expression,color=nT)) +
   xlab("Distance from tumor border  (µm)") +
   ylab("mean HLAABC expression per CN")
 
-pdf(file.path(cycif_fig_dir,"cn_exp","HLAABC expression per distance_v2.pdf"),width=5,height=5)
+pdf(file.path(fig_dir1,"exp_ts_axis","HLAABC expression per distance.pdf"),width=5,height=5)
 print(p.hla1)
 dev.off()
 ```
@@ -970,7 +656,7 @@ dev.off()
 #### [Fig S10A-mid] HLAABC - difference between tumor/stroma
 
 ```{r}
-## mean between 100-200um
+## mean between 150-300um
 e300 <- m.hla1 %>% 
   mutate(is.stroma = d1 > 0) %>%
   mutate(is.stroma = c("tumor core","stroma")[is.stroma+1]) %>%
@@ -1010,12 +696,12 @@ p.hla2 <- ggplot(e300,aes(x=nT,y=expression)) +
   geom_smooth(method="lm",aes(group=is.stroma,color=is.stroma))+
   geom_text(data=p.lm,aes(x=x,y=y,label=text,color=is.stroma)) +
   theme_minimal() +
-  ggtitle("HLAABC expression in tumor core and stroma\n(100-200um from border)") +
+  ggtitle("HLAABC expression in tumor core and stroma\n(150-300um from border)") +
   xlab("# of T cells per CN") +
   ylab("HLAABC Expression") + 
   theme(legend.position="none")
 
-pdf(file.path(cycif_fig_dir,"cn_exp","HLAABC vs nT.pdf"),width=5,height=5)
+pdf(file.path(fig_dir1,"exp_ts_axis","HLAABC vs nT.pdf"),width=5,height=5)
 print(p.hla2)
 dev.off()
 ```
@@ -1054,14 +740,13 @@ p.dpb1 <- ggplot(m.hla2,aes(x=d1,y=expression,color=nT)) +
   xlab("Distance from tumor border  (µm)") +
   ylab("mean HLADPB1 expression per CN")
 
-pdf(file.path(cycif_fig_dir,"cn_exp","HLADPB1 expression per distance_v2.pdf"),width=5,height=5)
+pdf(file.path(fig_dir1,"cn_exp","HLADPB1 expression per distance.pdf"),width=5,height=5)
 print(p.dpb1)
 dev.off()
 ```
 #### [Fig S10A-bot] HLA-DPB1 - difference between tumor/stroma
 
 ```{r}
-## mean between 100-200um
 e300 <- m.hla2 %>% 
   mutate(is.stroma = d1 > 0) %>%
   mutate(is.stroma = c("tumor core","stroma")[is.stroma+1]) %>%
@@ -1101,12 +786,12 @@ p.hla2 <- ggplot(e300,aes(x=nT,y=expression)) +
   geom_smooth(method="lm",aes(group=is.stroma,color=is.stroma))+
   geom_text(data=p.lm,aes(x=x,y=y,label=text,color=is.stroma)) +
   theme_minimal() +
-  ggtitle("HLADPB1 expression in tumor core and stroma\n(100-200um from border)") +
+  ggtitle("HLADPB1 expression in tumor core and stroma\n(150-300um from border)") +
   xlab("# of T cells per CN") +
   ylab("HLADPB1 Expression") + 
   theme(legend.position="none")
 
-pdf(file.path(cycif_fig_dir,"cn_exp","HLADPB1 vs nT.pdf"),width=5,height=5)
+pdf(file.path(fig_dir1,"cn_exp","HLADPB1 vs nT.pdf"),width=5,height=5)
 print(p.hla2)
 dev.off()
 ```
@@ -1115,31 +800,30 @@ dev.off()
 
 #### [Fig 6F] `dt` - Mean expression for _each protein_ per _cell types_
 ```{r}
-if(0){
-  ## only select columns stored in used.abs for frnn.exp and frnn.freq
-  dts <- list()
-  for(nm in nms){
-    cat(nm,"\n")
-    tmp <- df.cn %>%
-      mutate(is_ge10 = is.ge10) %>%
-      filter(smpl == nm) %>%
-      # filter(is_ge10) %>% #is.selected
-      select(smpl,cluster,d,cell_id,is_ge10) %>%
-      setDT()
-  
-    dts[[nm]] <- merge(lst.frnn.ct.exp[[nm]], tmp, by = c("cell_id"), all.x = TRUE)
-  }
-  
-  dt <- rbindlist(dts) %>%
-    as.data.frame() %>%
-    filter(is_ge10)
-  saveRDS(dt,file=file.path(cycif_obj_dir,"df.cn_exp_per_ct.RData"))
-}else{
-  dt <- readRDS(dt,file=file.path(cycif_obj_dir,"df.cn_exp_per_ct.RData"))
+lst.frnn <- list()
+for(nm in nms){
+  lst.frnn[[nm]] <- readRDS(file.path(obj_dir1,"cn","cn_frnn",paste0("cn_frnn_",nm,".rds")))
 }
 
+lst.frnn.ct.exp <- lapply(lst.frnn,function(x)x@exp.per.ct.cn)
+
+## only select columns stored in used.abs for frnn.exp and frnn.freq
+dts <- list()
+for(nm in nms){
+  tmp <- df.cn.t %>%
+    mutate(is_ge10 = (n >= 10)) %>%
+    filter(smpl == nm) %>%
+    select(smpl,cluster,d,cell_id,is_ge10) %>%
+    setDT()
+
+  dts[[nm]] <- merge(lst.frnn.ct.exp[[nm]], tmp, by = c("cell_id"), all.x = TRUE)
+}
+
+dt <- rbindlist(dts) %>%
+  as.data.frame() %>%
+  filter(is_ge10)
 ```
-#### HLAABC
+#### ER-dependence of HLAABC (hard-coding)
 
 ```{r}
 cts2 <- rep(c("ER_dep","ER_indep","ER_dep"),c(1,6,5))
@@ -1179,7 +863,7 @@ df.cn.hla1.dep <- df.cn.hla1 %>%
   mutate(cell_types = factor(cell_types,levels=c("Cancer","B","NK","Mac_CD68","Mac_CD163","Mac_CD68_CD163"))) 
   
 df.cn1.seg <- data.frame(i=factor(c(1,1,2,2)),
-                      x1=c(-400,-200, 200,400),
+                      x1=c(-300,-150, 150,300),
                       y1=rep(9.8,4))
 
 p.hla1.dep <- ggplot(df.cn.hla1.dep,aes(x=d1,y=expression,color=cell_types)) +
@@ -1192,7 +876,7 @@ p.hla1.dep <- ggplot(df.cn.hla1.dep,aes(x=d1,y=expression,color=cell_types)) +
   xlab("Distance from tumor border (µm)") +
   ylab("Expression")
 
-pdf(file.path(cycif_fig_dir,"cn_exp","exp_HLAABC_ER_dependence_v2.pdf"),width=5,height=7)
+pdf(file.path(fig_dir1,"ER_dep_HLA","exp_HLAABC_ER_dependence.pdf"),width=5,height=7)
 print(p.hla1.dep)
 dev.off()
 ```
@@ -1213,7 +897,7 @@ p.hla1.indep <- ggplot(df.cn.hla1.ind,aes(x=d1,y=expression,color=cell_types)) +
   ylab("Expression") +
   ylim(rng1)
 
-pdf(file.path(cycif_fig_dir,"cn_exp","exp_HLAABC_ER_independence_v2.pdf"),width=5,height=7)
+pdf(file.path(fig_dir1,"ER_dep_HLA","exp_HLAABC_ER_independence.pdf"),width=5,height=7)
 print(p.hla1.indep)
 dev.off()
 ```
@@ -1248,7 +932,7 @@ df.cn.hla2.dep <- df.cn.hla2 %>%
   mutate(cell_types = factor(cell_types,levels=c("Cancer","B","NK","Mac_CD68","Mac_CD163","Mac_CD68_CD163"))) 
 
 df.cn2.seg <- data.frame(i=factor(c(1,1,2,2)),
-                      x1=c(-400,-200, 200,400),
+                      x1=c(-300,-150, 150,300),
                       y1=rep(9.0,4))
   
 p.hla2.dep <- ggplot(df.cn.hla2.dep,aes(x=d1,y=expression,color=cell_types)) +
@@ -1261,7 +945,7 @@ p.hla2.dep <- ggplot(df.cn.hla2.dep,aes(x=d1,y=expression,color=cell_types)) +
   xlab("Distance from tumor border (µm)") +
   ylab("HLADPB1 Expression")
 
-pdf(file.path(cycif_fig_dir,"cn_exp","exp_HLADPB1_ER_dependence_v2.pdf"),width=5,height=7)
+pdf(file.path(fig_dir1,"ER_dep_HLA","exp_HLADPB1_ER_dependence.pdf"),width=5,height=7)
 print(p.hla2.dep)
 dev.off()
 ```
@@ -1269,7 +953,7 @@ dev.off()
 ### [Fig 6G] difference between stromal and tumor core expression of HLAABC and HLADPB1
 
 ```{r}
-th <- c(200,400)
+th <- c(150,300)
 int.exp <- df.cn.hla1 %>% 
   filter(d1 > -th[2] & d1 < -th[1]) %>%
   group_by(cell_types) %>%
@@ -1305,63 +989,43 @@ d.exp12 <- c(d.exp2,d.exp1)
 names(d.exp12) <- paste0(rep(c("dpb1","abc"),c(3,12)),"_",names(d.exp12))
 
 ##
-pdf(file.path(cycif_fig_dir,"cn_exp","barplot_HLAABC_HLADPB1_ER_dependence_v2.pdf"),width=6,height=7)
+pdf(file.path(fig_dir1,"ER_dep_HLA","barplot_HLAABC_HLADPB1_ER_dependence.pdf"),width=6,height=7)
 par(mar=c(12,5,4,1))
 barplot(d.exp12,las=2,
         main="dHLA expression (stroma - tumor core)",
         ylab="dHLA expression (% of stroma)",
         col=cols12)
 dev.off()
-
 ```
 
 ## expression per cell-type per CN cluster
 ### `lmers2` - mixed effect - expression per cluster per cell-type
-### `dt` - Mean expression for _each protein_ per _cell types_
 
 ```{r}
-dts <- list()
-for(nm in nms){
-  tmp <- df.cn %>%
-    mutate(is_ge10 = is.ge10) %>%
-    filter(smpl == nm) %>%
-    # filter(is_ge10) %>% #is.selected
-    select(smpl,cluster,d,cell_id,is_ge10) %>%
-    data.table::setDT()
-
-  dts[[nm]] <- merge(lst.frnn.ct.exp[[nm]], tmp, by = c("cell_id"), all.x = TRUE)
-}
-
-dt <- rbindlist(dts) %>%
-  as.data.frame() %>%
-  filter(is_ge10)
-```
-
-```{r}
-lmers2 <- list()
-for(ab1 in c("ERa","HLAABC","HLADPB1","PD1")){
-  cat(ab1,"..\n")
-
-  this.cts <- lst.cst.def[[ab1]]
-  df.cn.ab <- dt %>%  ## only within is_ge10
-    filter(cell_types %in% this.cts & !is.na(!!sym(ab1))) %>%
-    filter(!is.na(!!sym(ab1))) %>%
-    mutate(cell_types = factor(cell_types,levels=this.cts)) %>%
-    select(smpl,cluster,cell_types,!!sym(ab1))
-  names(df.cn.ab)[4] <- "ab"
-  
-  for(ct in this.cts){
-    df.cn.ab1 <- df.cn.ab %>% filter(cell_types == ct)
-    # Fit the mixed-effects model
-    lmer2 <- lmer(ab ~ cluster + (1|smpl), data = df.cn.ab1)
-    lmers2[[paste0(ab1,"_",ct)]] <- lmer2
-  }
-}
-
 if(0){
-  saveRDS(lmers2,file=file.path(cycif_obj_dir,"lmer_protein_exp_per_cell_type_v3.rds"))
+  lmers2 <- list()
+  for(ab1 in c("ERa","HLAABC","HLADPB1","PD1")){
+    cat(ab1,"..\n")
+  
+    this.cts <- lst.cst.def[[ab1]]
+    df.cn.ab <- dt %>%  ## only within is_ge10
+      filter(cell_types %in% this.cts & !is.na(!!sym(ab1))) %>%
+      filter(!is.na(!!sym(ab1))) %>%
+      mutate(cell_types = factor(cell_types,levels=this.cts)) %>%
+      select(smpl,cluster,cell_types,!!sym(ab1))
+    names(df.cn.ab)[4] <- "ab"
+    
+    for(ct in this.cts){
+      df.cn.ab1 <- df.cn.ab %>% filter(cell_types == ct)
+      # Fit the mixed-effects model
+      lmer2 <- lmer(ab ~ cluster + (1|smpl), data = df.cn.ab1)
+      lmers2[[paste0(ab1,"_",ct)]] <- lmer2
+    }
+  }
+
+  saveRDS(lmers2,file=file.path(obj_dir1,"exp_clust","lmer_protein_exp_per_cell_type.rds"))
 }else{
-  lmers2 <- readRDS(file=file.path(cycif_obj_dir,"lmer_protein_exp_per_cell_type_v3.rds"))
+  lmers2 <- readRDS(file=file.path(obj_dir1,"exp_clust","lmer_protein_exp_per_cell_type.rds"))
 }
 ```
 
@@ -1377,12 +1041,6 @@ coefs2 <- sapply(lmers2,function(lm){
   tmp[names(this)] <- this
   return(tmp)
 })
-
-if(0){
-  saveRDS(coefs2,file=file.path(cycif_obj_dir,"protein_exp_mixed_effect_per_cell_type_v3.rds"))
-}else{
-  coefs2 <- readRDS(file=file.path(cycif_obj_dir,"protein_exp_mixed_effect_per_cell_type_v3.rds"))
-}
 ```
 
 #### [Fig 6I] heatmap for cell-type level expression
@@ -1399,7 +1057,7 @@ coefs2.1 <- apply(coefs2,2,function(x){
   return(x1)
 })
 
-pdf(file.path(cycif_fig_dir,"cn_exp","cor_plot_mixed-effect","mixed_effect_ERa_per_ct_v4.pdf"),
+pdf(file.path(fig_dir1,"exp_cn_clust","mixed_effect_ERa_per_ct.pdf"),
     width=7,height=7)
 tmp <- t(coefs2.1[,c(1,1),drop=F])
 h3(tmp,Colv=NA,Rowv=NA,scale="none",cexRow=.5,col=cols,
@@ -1407,28 +1065,27 @@ h3(tmp,Colv=NA,Rowv=NA,scale="none",cexRow=.5,col=cols,
          main="ERa")
 dev.off()
 
-pdf(file.path(cycif_fig_dir,"cn_exp","cor_plot_mixed-effect","mixed_effect_HLAABC_per_ct_v4.pdf"),
+pdf(file.path(fig_dir1,"exp_cn_clust","mixed_effect_HLAABC_per_ct.pdf"),
     width=7,height=7)
 h3(t(coefs2.1[,rev(2:13)]),Colv=NA,Rowv=NA,scale="none",cexRow=.5,col=cols,
       RowSideColors = rep(pr.cols[2],12),
          main="HLAABC")
 dev.off()
 
-pdf(file.path(cycif_fig_dir,"cn_exp","cor_plot_mixed-effect","mixed_effect_HLADPB1_per_ct_v4.pdf"),
+pdf(file.path(fig_dir1,"exp_cn_clust","mixed_effect_HLADPB1_per_ct.pdf"),
     width=7,height=7)
 h3(t(coefs2.1[,rev(14:16)]),Colv=NA,Rowv=NA,scale="row",cexRow=.5,col=cols,
       RowSideColors = rep(pr.cols[3],3),    
          main="HLADPB1")
 dev.off()
 
-pdf(file.path(cycif_fig_dir,"cn_exp","cor_plot_mixed-effect","mixed_effect_PD1_per_ct_v4.pdf"),
+pdf(file.path(fig_dir1,"exp_cn_clust","mixed_effect_PD1_per_ct.pdf"),
     width=7,height=7)
-h3(t(coefs2.1[,rev(17:20)]),Colv=NA,Rowv=NA,scale="row",cexRow=.5,col=cols,
+h3(t(coefs2.1[,rev(c(17,19,20,18))]),Colv=NA,Rowv=NA,scale="row",cexRow=.5,col=cols,
          RowSideColors = rep(pr.cols[4],4),    
          main="PD1")
 dev.off()
 ```
-
 
 ## ER-dependent HLA expression
 ```{r}
@@ -1449,9 +1106,9 @@ pr.n <- c(1,12,3,4)
 par.types <- cbind(protein=rep(c(brewer.pal(7,"Set1")[c(2,1,3,4)]),c(pr.n)),
                    `ER-dep`=c("white","brown4")[c(colnames(cors.int.sp) %in% er.dep)+1])
 
-fn <- paste0("co-occurence_spearman_w_proteins_per_ct_v3.pdf")
+fn <- paste0("co-occurence_spearman_w_proteins_per_ct.pdf")
 
-pdf(file.path(cycif_fig_dir,"cn_exp","cor_plot_mixed-effect",fn),width=7,height=7)
+pdf(file.path(fig_dir1,"exp_cn_clust",fn),width=7,height=7)
 heatmap3(cors.int.sp,scale="none",balanceColor=T,margins=c(10,10),
          ColSideColors = par.types,RowSideColors = par.types)
 dev.off()
@@ -1463,7 +1120,7 @@ dev.off()
 hla <- cors.int.sp["ERa_Cancer",grepl("^HLA",colnames(cors.int.sp))]
 is.erdep <- names(hla) %in% er.dep
 
-p.val <- t.test(hla ~ is.erdep,alternative="greater")$p.value
+p.val <- t.test(hla ~ is.erdep,alternative="greater")$p.value # 3.7e-3
 
 df.cn.hla.erd <- data.frame(SCC=hla,class=c("ER-indep","ER-dep")[is.erdep+1]) %>%
   mutate(class=factor(class,levels=c("ER-dep","ER-indep"))) %>%
@@ -1478,20 +1135,19 @@ p.erd <- ggplot(df.cn.hla.erd,aes(x=class,y=SCC)) +
   geom_jitter(width=0.1,aes(color=protein)) +
   geom_text_repel(aes(label=cell_type),position=position_jitter(width=0.1)) +
   theme_minimal() +
-  ggtitle("SCC between HLA and ERa expression") +
+  ggtitle(paste0("SCC between HLA and ERa expression\n(p-value: 3.7e-3)")) +
   ylab("SCC with ERa expression in cancer cells") +
   xlab("")
 
-pdf(file.path(cycif_fig_dir,"cn_exp","cor_plot_mixed-effect","cor_hla_erd_v3.pdf"),width=4,height=5)
+pdf(file.path(fig_dir1,"exp_cn_clust","cor_hla_erd.pdf"),width=4,height=5)
 print(p.erd)
 dev.off()
 ```
 
-## X. lm coefs - trend for per cell type expression
-### among samples
+## Per-cell type and per-sample expression
 ```{r}
 used.abs <- c("ERa","HLAABC","HLADPB1","PD1")
-df.cn5 <- df.cn %>%
+df.cn5 <- df.cn.t %>%
   select(smpl,cell_types,!!!syms(used.abs)) %>%
   group_by(smpl,cell_types) %>%
   summarize_all(~mean(., na.rm = TRUE)) %>%
@@ -1518,8 +1174,8 @@ for(ab in used.abs){
 }
 lm.coefs <- do.call(rbind,lm.coefs)
 
-saveRDS(lm.coefs,file=file.path(cycif_obj_dir,"lm_coefs_smpls.rds"))
-write.csv(lm.coefs,file=file.path(cycif_fig_dir,"cn_various","cor_plot_mixed-effect","lm_coefs_smpls.csv"))
+saveRDS(lm.coefs,file=file.path(obj_dir1,"lm_coefs_smpls.rds"))
+write.csv(lm.coefs,file=file.path(fig_dir1,"cn_various","cor_plot_mixed-effect","lm_coefs_smpls.csv"))
 ```
 
 ### [Fig. S10A] Violin plot for HLAs
@@ -1547,7 +1203,7 @@ p <- ggplot(df.cn5.1,aes(x=cell_types,y=HLAABC)) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
         legend.position = "none") +
   ggtitle("HLAABC expression per cell type")
-pdf(file.path(cycif_fig_dir,"per_smpl","violin_HLAABC_per_ct.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"exp_per_smpl","violin_HLAABC_per_ct.pdf"),width=7,height=7)
 print(p)
 dev.off()
 
@@ -1596,7 +1252,7 @@ for(i in 1:12){
 }
   
 ## image() to visualize slps using the scale colorRampPalette(c("navy", "white", "firebrick3"))(1024), and write round(p.vals,3) in each cell
-pdf(file.path(cycif_fig_dir,"per_smpl","pval_HLAABC_per_ct.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"exp_per_smpl","pval_HLAABC_per_ct.pdf"),width=7,height=7)
 par(mar=c(10,10,4,1))
 image(1:12,1:12,slps.1,
       col=(colorRampPalette(blues9)(200)[1:100]),axes=F,xlab="",ylab="")
@@ -1686,7 +1342,7 @@ p <- ggplot(df.cn5.1,aes(x=cell_types,y=HLADPB1)) +
   ggtitle("HLADPB1 expression per celltype") +
   geom_text(data=p.vals.df.cn,aes(x=x.mid,y=y.mid,label=label),size=3)
 
-pdf(file.path(cycif_fig_dir,"per_smpl","violin_HLADPB1_per_ct.pdf"),width=2.5,height=7)
+pdf(file.path(fig_dir1,"exp_per_smpl","violin_HLADPB1_per_ct.pdf"),width=2.5,height=7)
 print(p)
 dev.off()
 ```
