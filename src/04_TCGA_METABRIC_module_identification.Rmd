@@ -18,28 +18,32 @@ suppressPackageStartupMessages({
 
 ### Load data
 ```{r}
-x <- load(file=file.path(obj_dir,"1-4_prep","gene_signature.rda")) # gene.sig
-y <- load(file=file.path(obj_dir,"1-4_prep","tcga_processed_v3.rda")) # tcga.ids,tcga.clinical,tcga.syms,tcga.m1,tcga.m3
-z <- load(file=file.path(obj_dir,"1-4_prep","metabric_processed_v3.rda")) # meta.ids,meta.clinical,meta.syms,meta.m1,meta.m3,meta.exp.th,meta.df,meta.sig.df
+x <- load(file=file.path(obj_dir,"Gene_modules","gene_signature.rda")) # gene.sig
+y <- load(file=file.path(obj_dir,"TCGA_META","tcga_processed.rda")) # tcga.ids,tcga.clinical,tcga.syms,tcga.m1,tcga.m3
+z <- load(file=file.path(obj_dir,"TCGA_META","metabric_processed.rda")) #
+#meta.ids,meta.clinical,meta.syms,meta.m1,meta.m3,meta.exp.th,meta.df,meta.sig.df 
 ```
 
 #### Gene and signature setup
 ```{r}
-ers.genes <- gene.sig$ers
+ers.genes <- gene.sig$ERS
 immune.genes <- unique(unlist(gene.sig[-1]))
 
 sig.gns <- unique(unlist(gene.sig)) ## 988 genes in either of the three signatures
-used.gns <- unique(intersect(unlist(gene.sig),intersect(tcga.syms,meta.syms))) ## 988 -> 778 unique
+gene.list.gns <- unique(intersect(unlist(gene.sig),intersect(tcga.syms,meta.syms))) ## 988 -> 778 unique
 tested.gns  <- intersect(tcga.syms,meta.syms) # 15397
 
-if(0){
-  saveRDS(tested.gns,file=file.path(obj_dir,"1-4_prep","common_tested_gns_v3.rds"))
-}
+hallmarks <- c("ESR1","CD8A","CD8B","HLA-A")
 ```
 
-### TCGA correlation for `used.gns`
+
 ```{r}
-tcga.exp <- tcga.m3[used.gns,]
+saveRDS(tested.gns,file=file.path(obj_dir,"TCGA_META","common_tested_gns.rds"))
+```
+
+### TCGA correlation for `gene.list.gns`
+```{r}
+tcga.exp <- tcga.m3[gene.list.gns,]
 tcga.sp <- list()
 
 for(cl in names(tcga.ids)){
@@ -49,9 +53,9 @@ for(cl in names(tcga.ids)){
 }
 ```
 
-### METABRIC correlation for `used.gns`
+### METABRIC correlation for `gene.list.gns`
 ```{r}
-meta.exp <- meta.m3[used.gns,]
+meta.exp <- meta.m3[gene.list.gns,]
 meta.sp <- list()
 
 for(cl in names(meta.ids)){
@@ -70,16 +74,12 @@ for(cl in names(meta.ids)){
 ```
 
 
-```{r}
-sapply(tcga.sp,function(x)sum(is.na(x))) ## no missing values
-sapply(meta.sp,function(x)sum(is.na(x))) ## no missing values
-```
 ### Save or load correlations
 ```{r}
 if(0){
-  save(tcga.sp,meta.sp,file=file.path(obj_dir,"1-4_prep","tcga_metabric_cors.rda"))
+  save(tcga.sp,meta.sp,file=file.path(obj_dir,"TCGA_META","tcga_metabric_cors.rda"))
 }else{
-  load(file=file.path(obj_dir,"1-4_prep","tcga_metabric_cors.rda")) # tcga.sp, meta.sp
+  load(file=file.path(obj_dir,"TCGA_META","tcga_metabric_cors.rda")) # tcga.sp, meta.sp
 }
 ```
 
@@ -88,53 +88,26 @@ if(0){
 ### [Fig S1B] Correlation between hallmark genes
 
 ```{r}
-tri.heatmap <- function(x,rm.diag=TRUE,mar=c(5,5,3,3),...){
-  if(!isSymmetric(tcga.sp1)){
-    stop("only symmetric matrix can be handled")
-  }
-  op <- par()
-  par(mar=mar)
-      
-  n <- nrow(x)
-  x[lower.tri(x)] <- NA
-  if(rm.diag){
-    m <- n-1
-    idx <- seq(n)[-1]
-    diag(x) <- NA
-  }else{
-    m <- n
-    idx <- seq(n)
-  }
-  # cols <- colorRampPalette(rev(brewer.pal(11,"RdBu")))(50)
-  cols <- colorRampPalette(c("navy", "white", "firebrick3"))(1024)
-  image(seq(m),seq(m),x[seq(m),rev(seq(n)[idx])],col=cols,axes=F,xlab="",ylab="",zlim=c(-1,1),...)
-  axis(1,at=seq(m),rownames(x)[seq(m)],las=2)
-  axis(2,at=seq(m),rev(rownames(x)[idx]),las=1)
-  for(i in seq(n)){
-    for(j in seq(n)){
-      text(i,n-j+1,round(x[i,j],2))
-    }
-  }
-  on.exit(suppressWarnings(par(op)))
-}
+source(file.path(src_dir,"utils","tri.heatmap.R"))
 ```
 
 ```{r}
 tcga.sp1 <- tcga.sp$hr
 meta.sp1 <- meta.sp$hr
 
-hallmarks <- c("ESR1","CD8A","CD8B","HLA-A")
-
 tcga.hm <- tcga.sp1[hallmarks,hallmarks]
 tcga.hm[!upper.tri(tcga.hm)] <- NA
 meta.hm <- meta.sp1[hallmarks,hallmarks]
 meta.hm[!upper.tri(meta.hm)] <- NA
+```
 
-pdf(file.path(fig_dir,"4_tcga_metabric","corr_hallmark_tcga_ext.pdf"),width=5,height=5)
+
+```{r}
+pdf(file.path(fig_dir,"04_TCGA_METABRIC_module_identification","corr_hallmark_tcga_ext.pdf"),width=5,height=5)
 tri.heatmap(tcga.hm,main="TCGA")
 dev.off()
 
-pdf(file.path(fig_dir,"4_tcga_metabric","corr_hallmark_meta_ext.pdf"),width=5,height=5)
+pdf(file.path(fig_dir,"04_TCGA_METABRIC_module_identification","corr_hallmark_meta_ext.pdf"),width=5,height=5)
 tri.heatmap(meta.hm,main="METABRIC")
 dev.off()
 ```
@@ -151,10 +124,10 @@ identical(rownames(tcga.m1),rownames(meta.m1))
 med.t <- rowMeans(tcga.m1,na.rm=T)
 med.m <- rowMeans(meta.m1,na.rm=T)
 
-med.ht <- rowMeans(tcga.m1[used.gns,tcga.ids$hr],na.rm=T)
-med.hm <- rowMeans(meta.m1[used.gns,meta.ids$hr],na.rm=T)
-cor.t <- tcga.sp$hr[used.gns,used.gns]
-cor.m <- meta.sp$hr[used.gns,used.gns]
+med.ht <- rowMeans(tcga.m1[gene.list.gns,tcga.ids$hr],na.rm=T)
+med.hm <- rowMeans(meta.m1[gene.list.gns,meta.ids$hr],na.rm=T)
+cor.t <- tcga.sp$hr[gene.list.gns,gene.list.gns]
+cor.m <- meta.sp$hr[gene.list.gns,gene.list.gns]
 diag(cor.t) <- NA
 diag(cor.m) <- NA
 med.cor.t <- rowMeans(abs(cor.t),na.rm=T)
@@ -166,7 +139,7 @@ med.cors <- list(TCGA=med.cor.t,METABRIC=med.cor.m)
 
 ```{r}
 ## Fig S1C
-pdf(file.path(fig_dir,"4_tcga_metabric","mean_expression_2cohorts.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"04_TCGA_METABRIC_module_identification","mean_expression_2cohorts.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 cols <- densCols(med.t,med.m,nbin=256)
 plot(med.t,med.m,col=cols,pch=20,cex=.4,
@@ -180,7 +153,7 @@ text(15,meta.exp.th,"Background\nbelow this line",pos=3,cex=1)
 dev.off()
 
 ## Fig S1D
-pdf(file.path(fig_dir,"4_tcga_metabric","mean_corr_2cohorts.pdf"),width=5,height=7)
+pdf(file.path(fig_dir,"04_TCGA_METABRIC_module_identification","mean_corr_2cohorts.pdf"),width=5,height=7)
 p.val <- signif(t.test(med.cors$TCGA,med.cors$METABRIC,alterantive="two.sided",paired=T)$p.value,2)
 boxplot(med.cors,ylab="Mean absolute spearman corr.",
         main=paste0("Magnitude of correlation within two modules\n(p-value:",signif(p.val,2),")"))
@@ -188,7 +161,7 @@ dev.off()
 
 ## Fig S1E_left
 rng <- range(med.cors)
-pdf(file.path(fig_dir,"4_tcga_metabric","mean_exp_corr_tcga.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"04_TCGA_METABRIC_module_identification","mean_exp_corr_tcga.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 cols <- densCols(med.ht,med.cor.t,nbin=256)
 plot(med.ht,med.cor.t,col=cols,pch=20,cex=1,ylim=rng,
@@ -198,7 +171,7 @@ plot(med.ht,med.cor.t,col=cols,pch=20,cex=1,ylim=rng,
 dev.off()
 
 ## Fig S1E_right
-pdf(file.path(fig_dir,"4_tcga_metabric","mean_exp_corr_metabric.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"04_TCGA_METABRIC_module_identification","mean_exp_corr_metabric.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 cols <- densCols(med.hm,med.cor.m,nbin=256)
 plot(med.hm,med.cor.m,col=cols,pch=20,cex=1,ylim=rng,
@@ -208,7 +181,6 @@ plot(med.hm,med.cor.m,col=cols,pch=20,cex=1,ylim=rng,
 abline(v=meta.exp.th,lty=2,col=1,lwd=2)
 text(meta.exp.th,0.27,"Background\nleft to this line",pos=4,cex=1)
 dev.off()
-
 ```
 
 ## Identify modules
@@ -226,11 +198,11 @@ meta.sp1 <- meta.sp$hr
 cols <- colorRampPalette(c("navy", "white", "firebrick3"))(1024)
 
 
-hc.t <- heatmap3(tcga.sp1[used.gns,used.gns],
+hc.t <- heatmap3(tcga.sp1[gene.list.gns,gene.list.gns],
           col=cols,distfun=dist,scale="none",
           balanceColor=TRUE,
           main="TCGA (778 genes)")
-hc.m <- heatmap3(meta.sp1[used.gns,used.gns],
+hc.m <- heatmap3(meta.sp1[gene.list.gns,gene.list.gns],
           col=cols,distfun=dist,scale="none",
           balanceColor=TRUE,
           main="METABRIC (778 genes)")
@@ -252,17 +224,17 @@ if(0){
 c1.t <- cutree(hcr.t,h=12.9)
 cl1.t <- tapply(names(c1.t),c1.t,identity)
 
-cc.t <- intersect(cl1.t[[5]],gene.sig$ers) # proliferation
-immune.t <- intersect(cl1.t[[1]],c(gene.sig$apm,gene.sig$tc)) # immune
+cc.t <- intersect(cl1.t[[5]],gene.sig$ERS) # proliferation
+immune.t <- intersect(cl1.t[[1]],c(gene.sig$APM,gene.sig$TC)) # immune
 
 ## first define the immune and proliferation
 c2 <- cutree(hcr.t,h=6)
 cl2 <- tapply(names(c2),c2,identity)
 idx <- grep("ESR1",cl2)
 
-ers.t <- intersect(cl2[[idx]],gene.sig$ers)
+ers.t <- intersect(cl2[[idx]],gene.sig$ERS)
 
-tcga.sig <- list(ers=ers.t,cc=cc.t,immune=immune.t)
+tcga.sig <- list(ERS=ers.t,CC=cc.t,Immune=immune.t)
 ```
 
 #### Gene selection in METABRIC
@@ -280,23 +252,23 @@ if(0){
 c1.m <- cutree(hcr.m,h=13)
 cl1.m <- tapply(names(c1.m),c1.m,identity)
 
-cc.m <- intersect(cl1.m[[3]],gene.sig$ers) # proliferation
-immune.m <- intersect(cl1.m[[1]],c(gene.sig$apm,gene.sig$tc)) # immune
+cc.m <- intersect(cl1.m[[3]],gene.sig$ERS) # proliferation
+immune.m <- intersect(cl1.m[[1]],c(gene.sig$APM,gene.sig$TC)) # immune
 
 ## first define the immune and proliferation
 c2 <- cutree(hcr.m,h=8)
 cl2 <- tapply(names(c2),c2,identity)
 idx <- c2["ESR1"]
 
-ers.m <- intersect(cl2[[idx]],gene.sig$ers)
+ers.m <- intersect(cl2[[idx]],gene.sig$ERS)
 
-meta.sig <- list(ers=ers.m,cc=cc.m,immune=immune.m)
+meta.sig <- list(ERS=ers.m,CC=cc.m,Immune=immune.m)
 ```
 
 #### Combine both signatures - select genes that are only positively correated within the module
 
 ```{r}
-nm.sigs <- c("ERS","Immune","CC")
+nm.sigs <- c("ERS","CC","Immune")
 
 sigs <- list()
 for(sig in nm.sigs){
@@ -308,13 +280,13 @@ for(sig in nm.sigs){
 
 if(0){
   ## ERS module
-  sp1 <- tcga.sp1[sigs$ers,sigs$ers] 
+  sp1 <- tcga.sp1[sigs$ERS,sigs$ERS] 
   diag(sp1) <- NA
   hist(sp1,breaks=100)
   sum(sp1 < 0,na.rm=T) # ERS module is all positively correlated
   
   ## APM/TC module
-  sp2 <- tcga.sp1[sigs$immune,sigs$immune]
+  sp2 <- tcga.sp1[sigs$Immune,sigs$Immune]
   diag(sp2) <- NA
   hist(sp2,breaks=100)
   sum(sp2 < 0,na.rm=T) # 1992 combination is negative
@@ -326,14 +298,14 @@ if(0){
 }
 
 ## trim positive cor between ers and immune
-sp12 <- tcga.sp1[sigs$ers,sigs$immune] 
+sp12 <- tcga.sp1[sigs$ERS,sigs$Immune] 
 hist(sp12,breaks=100)
 g12 <- colSums(sp12 > 0,na.rm=T)
 m12 <- colMeans(sp12)
 any(m12 > 0) ## 6 APM/TC genes are positively correlated with ERS on average
 
 pos <- names(which(m12 >= 0)) ## the six genes to be removed
-sigs$immune <- sigs$immune[!sigs$immune %in% pos] # refine sigs-immune
+sigs$Immune <- sigs$Immune[!sigs$Immune %in% pos] # refine sigs-immune
 
 ##
 g12 <- rowSums(sp12 > 0,na.rm=T)/ncol(sp12)
@@ -354,19 +326,10 @@ if(0){
   hist(sp2,breaks=100)
 }
 ```
-### finalized signature
-```{r}
-sapply(sigs,length)
-```
-### `cc` signature
-```{r}
-comm.ers.2 <- sigs$cc
-```
-
 ### Subdividing the APM/TC module
 ```{r}
-comm.gns1 <- c(sigs$ers,sigs$immune)
-a <- heatmap3(tcga.sp1[comm.gns1,comm.gns1],col=cols,balanceColor=TRUE,scale="none")
+module.gns <- c(sigs$ERS,sigs$Immune)
+a <- heatmap3(tcga.sp1[module.gns,module.gns],col=cols,balanceColor=TRUE,scale="none")
 
 ##
 hcr1 <- hcr <- a$hcr
@@ -394,13 +357,12 @@ sapply(mod.gns,length)
 
 ### [side_colors] save side colors for heatmap
 ```{r}
-## lcol1: hallmark genes
-lcol1 <- rep("white",length(used.gns))
-names(lcol1) <- used.gns
+lcol1 <- rep("white",length(gene.list.gns))
+names(lcol1) <- gene.list.gns
 lcol1[c("ESR1","CD8A","HLA-A")] <- rep(c("steelblue","indianred"),c(1,2))
 
 ## lcol2: initial gene sets
-gs1 <- sapply(gene.sig,function(gs)used.gns %in% gs)
+gs1 <- sapply(gene.sig,function(gs)gene.list.gns %in% gs)
 gs2 <- cbind(ERS=gs1[,1],Immune=(gs1[,2]|gs1[,3]))
 gs.type <- factor(gs2 %*% c(1,2))
 levels(gs.type) <- c("ERS","Immune","Both")
@@ -408,55 +370,66 @@ levels(gs.type) <- c("ERS","Immune","Both")
 lcol2 <- c(brewer.pal(3,"Pastel1")[2:1],"white")[as.numeric(gs.type)]
 
 # lcol3: final clusters
-lcol3 <- rep("white",length(used.gns))
-names(lcol3) <- used.gns
-lcol3[sigs$ers] <- "steelblue"
-lcol3[sigs$immune] <- "indianred"
-lcol3[sigs$cc] <- "grey"
+lcol3 <- rep("white",length(gene.list.gns))
+names(lcol3) <- gene.list.gns
+lcol3[sigs$ERS] <- "steelblue"
+lcol3[sigs$Immune] <- "indianred"
+lcol3[sigs$CC] <- "grey"
 
 ## lcol4: APM/TC subclasses
-lcol4 <- rep("white",length(used.gns))
-names(lcol4) <- used.gns
+lcol4 <- rep("white",length(gene.list.gns))
+names(lcol4) <- gene.list.gns
 lcol4[names(c3)] <- c("white",brewer.pal(3,"Accent")[c(1,3,2)])[c3]
 
-lcols <- cbind(hallmark=lcol1,`initial collection`=lcol2,`module`=lcol3,`immune`=lcol4)
-rownames(lcols) <- used.gns
+gl.side.cols <- cbind(hallmark=lcol1,`initial collection`=lcol2,`module`=lcol3,`immune`=lcol4)
+rownames(gl.side.cols) <- gene.list.gns
+mod.side.cols <- gl.side.cols[module.gns,-2]
+
+slcol3 <- rep(c("steelblue","indianred"),c(1,3))
+slcol4 <- c("white",brewer.pal(3,"Accent")[c(1,3,2)])
+
+uniq.mod.side.cols <- cbind(`module`=slcol3,`immune`=slcol4)
+rownames(uniq.mod.side.cols) <- names(mod.gns)
 ```
 
 ```{r}
-slcol3 <- rep(c("steelblue","indianred"),c(1,3))
-slcol4 <- c("white",brewer.pal(3,"Accent")[c(1,3,2)])
-slcols <- cbind(`module`=slcol3,`immune`=slcol4)
-rownames(slcols) <- names(mod.gns)
+if(0){
+  save(gl.side.cols,mod.side.cols,uniq.mod.side.cols,file=file.path(obj_dir,"misc","tcga_sidecols.rda"))
+  # lcols -> gl.side.cols
+  # slcols -> uniq.m.side.cols
+}
 ```
+
 
 ### [Fig 1B, S2A] Heatmaps - all 778 genes
 ```{r}
 tcga.sp3 <- tcga.sp1
 meta.sp3 <- meta.sp1
-is.hmk <- used.gns %in% hallmarks
+is.hmk <- gene.list.gns %in% hallmarks
 rownames(tcga.sp3)[!is.hmk] <- colnames(tcga.sp3)[!is.hmk] <- NA
 rownames(meta.sp3)[!is.hmk] <- colnames(meta.sp3)[!is.hmk] <- NA
 if(1){
-  pdf(file.path(fig_dir,"1_prep_genes","heatmap_corr_tcga_all_v2.pdf"),width=15,height=15)
+  pdf(file.path(fig_dir,"04_TCGA_METABRIC_module_identification","heatmap_corr_tcga_all_v2.pdf"),
+      width=15,height=15)
   hc.t <- heatmap3(tcga.sp3,
             col=cols,distfun=dist,scale="none",
             balanceColor=TRUE,
-            ColSideColors=lcols[,1:3],
-            RowSideColors=lcols[,1:3],
+            ColSideColors=gl.side.cols[,1:3],
+            RowSideColors=gl.side.cols[,1:3],
             margins=c(9,9),
             cexRow=3,cexCol=3,
             main="TCGA (778 genes)")
   dev.off()
   
-  pdf(file.path(fig_dir,"1_prep_genes","heatmap_corr_meta_all_v2.pdf"),width=15,height=15)
+  pdf(file.path(fig_dir,"04_TCGA_METABRIC_module_identification","heatmap_corr_meta_all_v2.pdf"),
+      width=15,height=15)
   hc.m <- heatmap3(meta.sp3,
             col=cols,distfun=dist,scale="none",
             balanceColor=TRUE,
             margins=c(9,9),            
             cexRow=3,cexCol=3,
-            ColSideColors=lcols[,1:3],
-            RowSideColors=lcols[,1:3],          
+            ColSideColors=gl.side.cols[,1:3],
+            RowSideColors=gl.side.cols[,1:3],          
             main="METABRIC (778 genes)")
   dev.off()
 }
@@ -493,12 +466,12 @@ cols <- colorRampPalette(c("navy", "white", "firebrick3"))(201)
 n.max.cor.1 <- round(max(abs(mean.tcga.sp))*100)
 cols1 <- cols[(-100:100) %in% seq(-n.max.cor.1,n.max.cor.1)]
 
-pdf(file.path(fig_dir,"4_tcga_metabric","heatmap_mean_tcga_mods_v2.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"04_TCGA_METABRIC_module_identification","heatmap_mean_tcga_mods_v2.pdf"),width=7,height=7)
 hc.t <- heatmap3(mean.tcga.sp[idx,idx],Rowv=NA,Colv=NA,
     # dendrogram="none",
     col=cols1,scale="none",distfun=dist,
-    ColSideColors=slcols[idx,2:1],
-    RowSideColors=slcols[idx,],          
+    ColSideColors=uniq.mod.side.cols[idx,2:1],
+    RowSideColors=uniq.mod.side.cols[idx,],          
     balanceColor = TRUE,
     margins=c(7,7),
     cexRow=1.5,cexCol=1.5,
@@ -508,12 +481,12 @@ dev.off()
 n.max.cor.2 <- round(max(abs(mean.meta.sp))*100)
 cols2 <- cols[(-100:100) %in% seq(-n.max.cor.2,n.max.cor.2)]
 
-pdf(file.path(fig_dir,"4_tcga_metabric","heatmap_mean_meta_mods.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"04_TCGA_METABRIC_module_identification","heatmap_mean_meta_mods.pdf"),width=7,height=7)
 hc.m <- heatmap3(mean.meta.sp[idx,idx],Rowv=NA,Colv=NA,
           # dendrogram="none",
           col=cols2,scale="none",distfun=dist,
-          ColSideColors=slcols[idx,2:1],
-          RowSideColors=slcols[idx,],          
+          ColSideColors=uniq.mod.side.cols[idx,2:1],
+          RowSideColors=uniq.mod.side.cols[idx,],          
           balanceColor = TRUE,          
           margins=c(7,7),       
           cexRow=1.5,cexCol=1.5,  
@@ -524,10 +497,8 @@ dev.off()
 ### [Fig 1D, S2B] subset of genes
 
 ```{r}
-comm.gns <- unlist(sigs[1:2])
-
-tcga.sp1 <- tcga.sp$hr[comm.gns,comm.gns]
-meta.sp1 <- meta.sp$hr[comm.gns,comm.gns]
+tcga.sp1 <- tcga.sp$hr[module.gns,module.gns]
+meta.sp1 <- meta.sp$hr[module.gns,module.gns]
 
 d.tcga <- as.dist(1-tcga.sp1)
 d.meta <-as.dist(1-meta.sp1)
@@ -536,48 +507,44 @@ dend2 <- as.dendrogram(hclust(d.meta,method="average"))
 
 a <- heatmap3(tcga.sp1,
               Colv=d.tcga,Rowv=d.tcga,
-              # ColSideColors=lcols[comm.gns,],
+              # ColSideColors=gl.side.cols[module.gns,],
               col=cols,
               scale="none",
               balanceColor=TRUE)
 
 hcr1 <- hcr <- a$hcr
 hcr1$labels[!hcr1$labels %in% hallmarks] <- ""
-plot(hcr1,lwd=.5,cex=.3)
-abline(h=1,col=3)
+if(0){
+  plot(hcr1,lwd=.5,cex=.3)
+  abline(h=1,col=3)
+}
 
 c3 <- cutree(hcr,h=1)
 cl3 <- tapply(names(c3),c3,identity)
 names(cl3) <- c("ERS",paste0("Immune",1:3))
 
-used.gns <- comm.gns
-
 ## lcol1: hallmark genes
-lcol1 <- rep("white",length(used.gns))
-names(lcol1) <- used.gns
+lcol1 <- rep("white",length(module.gns))
+names(lcol1) <- module.gns
 lcol1[c("ESR1","CD8A","HLA-A")] <- rep(c("blue","red"),c(1,2))
 
 # lcol3: final clusters
-lcol3 <- rep("white",length(used.gns))
-names(lcol3) <- used.gns
-lcol3[sigs$ers] <- "steelblue"
-lcol3[sigs$immune] <- "indianred"
+lcol3 <- rep("white",length(module.gns))
+names(lcol3) <- module.gns
+lcol3[sigs$ERS] <- "steelblue"
+lcol3[sigs$Immune] <- "indianred"
 
 ## APM/TC subclasses
 lcol4 <- cbind(subclass=c("white",brewer.pal(3,"Accent"))[c3])
 
-sig.lcols <- cbind(hallmark=lcol1,module=lcol3,subclass=lcol4)
+mod.side.cols <- cbind(hallmark=lcol1,module=lcol3,subclass=lcol4)
 
-if(0){
-  saveRDS(sig.lcols,file=file.path(obj_dir,"1-4_prep","sigs_sidecols.rds"))
-}
-
-is.hmk <- comm.gns %in% hallmarks
+is.hmk <- module.gns %in% hallmarks
 rownames(tcga.sp1)[!is.hmk] <- colnames(tcga.sp1)[!is.hmk] <- NA
 rownames(meta.sp1)[!is.hmk] <- colnames(meta.sp1)[!is.hmk] <- NA
 
 ##
-rng <- range(tcga.sp1)#[comm.gns,comm.gns])
+rng <- range(tcga.sp1)#[module.gns,module.gns])
 n.rng <- max(abs(round((rng/1)*50)))*c(-1,1)
 # cols <- colorRampPalette(rev(brewer.pal(11,"RdBu")))(101)
 cols <- colorRampPalette(c("navy", "white", "firebrick3"))(101)
@@ -585,12 +552,14 @@ cols <- colorRampPalette(c("navy", "white", "firebrick3"))(101)
 names(cols) <- -50:50
 cols <- cols[as.character(seq(n.rng[1],n.rng[2]))]
 
-pdf(file.path(fig_dir,"4_tcga_metabric","heatmap_corr_tcga_sub_v2.pdf"),width=15,height=15)
+##
+pdf(file.path(fig_dir,"04_TCGA_METABRIC_module_identification","heatmap_corr_tcga_sub_v2.pdf"),
+    width=15,height=15)
 a <- heatmap3(tcga.sp1,
               Colv=d.tcga,Rowv=d.tcga,
               col=cols,scale="none",
-              ColSideColors=sig.lcols[comm.gns,],
-              RowSideColors=sig.lcols[comm.gns,],
+              ColSideColors=mod.side.cols,
+              RowSideColors=mod.side.cols,
               margins=c(9,9),
               cexRow=3,cexCol=3,              
               balanceColor=TRUE)
@@ -604,12 +573,12 @@ cols <- colorRampPalette(c("navy", "white", "firebrick3"))(101)
 names(cols) <- -50:50
 cols <- cols[as.character(seq(n.rng[1],n.rng[2]))]
 
-pdf(file.path(fig_dir,"4_tcga_metabric","heatmap_corr_meta_sub_v2.pdf"),width=15,height=15)
+pdf(file.path(fig_dir,"04_TCGA_METABRIC_module_identification","heatmap_corr_meta_sub_v2.pdf"),width=15,height=15)
 b <- heatmap3(meta.sp1,
               Colv=d.meta,Rowv=d.meta,
               col=cols,scale="none",
-              ColSideColors=sig.lcols[comm.gns,],
-              RowSideColors=sig.lcols[comm.gns,],
+              ColSideColors=mod.side.cols,
+              RowSideColors=mod.side.cols,
               margins=c(9,9),
               cexRow=3,cexCol=3,              
               balanceColor=TRUE)
@@ -620,24 +589,25 @@ dev.off()
 ### as csv files
 ```{r}
 x <- list(
-  ers=data.frame(geneid=unlist(mget(sort(mod.gns$ERS),org.Hs.egSYMBOL2EG,ifnotfound=NA)),symbol=sort(mod.gns$ERS)),
+  ERS=data.frame(geneid=unlist(mget(sort(mod.gns$ERS),org.Hs.egSYMBOL2EG,ifnotfound=NA)),symbol=sort(mod.gns$ERS)),
   `TNFa_NFkB`=data.frame(geneid=sapply(mget(sort(mod.gns[["TNFa/NFkB"]]),org.Hs.egSYMBOL2EG,ifnotfound=NA),paste,collapse=";"),
                     symbol=sort(mod.gns[["TNFa/NFkB"]])),
   `IFN-I`=data.frame(geneid=sapply(mget(sort(mod.gns[["IFN-I"]]),org.Hs.egSYMBOL2EG,ifnotfound=NA),paste,collapse=";"),
                     symbol=sort(mod.gns[["IFN-I"]])),  
   `APM_TC`=data.frame(geneid=sapply(mget(sort(mod.gns[["APM/TC"]]),org.Hs.egSYMBOL2EG,ifnotfound=NA),paste,collapse=";"),
                     symbol=sort(mod.gns[["APM/TC"]])),
-  prolif=data.frame(geneid=sapply(mget(sort(sigs$cc),org.Hs.egSYMBOL2EG,ifnotfound=NA),paste,collapse=";"),
-                    symbol=sort(sigs$cc)))
+  `Cell cycle`=data.frame(geneid=sapply(mget(sort(sigs$CC),org.Hs.egSYMBOL2EG,ifnotfound=NA),paste,collapse=";"),
+                    symbol=sort(sigs$CC)))
 wb <- openxlsx::buildWorkbook(x)
 
-openxlsx::saveWorkbook(wb,file.path(fig_dir,"Table S2 gene_modules_122923.xlsx"))
+openxlsx::saveWorkbook(wb,file.path(fig_dir,"04_TCGA_METABRIC_module_identification",
+                                    "Table S2 gene_modules.xlsx"))
 ```
 ### as R objects
 
 ```{r}
-saveRDS(sigs, file=file.path(obj_dir,"1-4_prep","modules3_ers_immune_cc.rds")) # ers, immune, cc
-saveRDS(mod.gns, file=file.path(obj_dir,"1-4_prep","module_genes_final_122923.rds")) # module genes
-save(lcols, slcols, file=file.path(obj_dir,"1-4_prep","heatmap_sidecols.rda"))
+saveRDS(sigs, file=file.path(obj_dir,"Gene_modules","modules3_ers_immune_cc.rds")) # ers, immune, cc
+saveRDS(mod.gns, file=file.path(obj_dir,"Gene_modules","module_genes_final.rds")) # module genes
+save(gl.side.cols, mod.side.cols, uniq.mod.side.cols,file=file.path(obj_dir,"misc","tcga_heatmap_sidecols.rda"))
 ```
 
