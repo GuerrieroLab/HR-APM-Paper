@@ -1,6 +1,5 @@
 ---
-title: "1. create gene signatures from the excel files"
-#output: html_notebook
+title: "Compile manually curated gene signatures into R object"
 ---
 
 ## Initial setting
@@ -10,9 +9,6 @@ suppressPackageStartupMessages({
   library(openxlsx)
 })
 ```
-
-### Set paths
-This part is moved to  `.Rprofile` and not not shared in github. (See README.md)
 
 ## Load manually cureated gene lists
 ### Funciton to load genes
@@ -40,7 +36,7 @@ length(tc_gns) # 221 genes
 ## Save the gene lists as an rda file
 ```{r}
 gene.sig <- list(ERS = ers_gns, APM = apm_gns, TC = tc_gns)
-save(gene.sig,file=file.path(obj_dir,"1-4_prep","gene_signature.rda"))
+save(gene.sig,file=file.path(obj_dir,"Gene_modules","gene_signature.rda"))
 ```
 
 
