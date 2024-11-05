@@ -1,0 +1,157 @@
+---
+title: "Lymph and Macrophage Cell Type Analysis"
+author: "Kenichi Shimada"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Initial setup
+
+### Load libraries
+```{r}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(caret)
+})
+```
+
+### Load input data
+```{r}
+obj_dir1 <- file.path(obj_dir,"DFBCC_sn")
+fig_dir1 <- file.path(fig_dir,"14_DFBCC_snSeq_prep_mye")
+
+x3 <- load(file=file.path(obj_dir1, "seurat_sct_mac_KS.RData")) # seurat_mac
+```
+
+### customSummary - sumary of elastic net regression
+```{r}
+# Print the model summary
+customSummary <- function(data, lev = NULL, model = NULL) {
+  sensitivity <- sensitivity(data$obs, data$pred, lev[1])
+  out <- c(Sensitivity = sensitivity)
+  names(out) <- c("Sensitivity")
+  out
+}
+
+```
+
+## Subsetting `seurat_mac` to macrophage subtypes
+
+### Macrophage cell types in seurat_mac
+
+```{r}
+mac_gns <- c("CD68", "CD163", "CD14", "LYZ", "FCGR3A")
+```
+
+```{r}
+set.seed(123)
+mac.cts <- seurat_mac$celltype_broad
+seurat_mac <- subset(seurat_mac, cells=names(mac.cts[!mac.cts %in% c("Undetermined", "CTSK_TAM")]))
+
+seurat_mac <- SCTransform(seurat_mac, method = "glmGamPoi", vars.to.regress = "mitoRatio", verbose = TRUE, variable.features.n = 3000)
+seurat_mac <- RunPCA(seurat_mac, assay = "SCT", npcs = 100, verbose = TRUE)
+
+raw.matrix <- GetAssayData(seurat_mac, assay = "RNA", layer ="data")
+
+if(0){
+  # Elbow Plot for PCA Variance
+  pdf("Elbowplot_sct_sct_macv2_clean.pdf")
+  ElbowPlot(seurat_mac, ndims = 100)
+  dev.off()
+}
+
+# UMAP without Harmony
+use.pcs <- 1:30
+seurat_mac <- RunUMAP(seurat_mac, reduction = "pca", assay = "SCT", dims = use.pcs, verbose = TRUE)
+seurat_mac <- FindNeighbors(object = seurat_mac, reduction = "pca", dims = use.pcs, assay = "SCT")
+seurat_mac <- FindClusters(object = seurat_mac, resolution = seq(0.1, 1, 0.1))
+```
+
+### Building CD68 and CD163 classifiers
+```{r}
+CD68.pos <- raw.matrix["CD68", ] > 0
+CD163.pos <- raw.matrix["CD163", ] > 0
+
+# Define Elastic Net Model
+x <- Embeddings(seurat_mac, "pca")[, 1:30]
+y_CD68 <- factor(CD68.pos, levels=c("TRUE", "FALSE"))
+y_CD163 <- factor(CD163.pos, levels=c("TRUE", "FALSE"))
+
+x_CD68 <- data.frame(cbind(y_CD68, x))
+x_CD68$y_CD68 <- factor(x_CD68$y_CD68, labels=c("X_TRUE", "X_FALSE"))
+x_CD163 <- data.frame(cbind(y_CD163, x))
+x_CD163$y_CD163 <- factor(x_CD163$y_CD163, labels=c("X_TRUE", "X_FALSE"))
+
+# Balance the data
+set.seed(123)
+y.CD68.true <- which(x_CD68$y_CD68 == "X_TRUE")
+y.CD68.false <- sample(which(x_CD68$y_CD68 == "X_FALSE"), length(y.CD68.true))
+x.sub.CD68 <- x_CD68[c(y.CD68.true, y.CD68.false), ]
+
+y.CD163.true <- which(x_CD163$y_CD163 == "X_TRUE")
+y.CD163.false <- sample(which(x_CD163$y_CD163 == "X_FALSE"), length(y.CD163.true))
+x.sub.CD163 <- x_CD163[c(y.CD163.true, y.CD163.false), ]
+
+# Define Control for Cross-Validation
+train_control <- trainControl(method = "cv", number = 5, classProbs = TRUE, summaryFunction = customSummary)
+
+# Train Models for CD68 and CD163
+model68 <- train(y_CD68 ~ ., data=x.sub.CD68, method = "glm", family = "binomial", trControl = train_control, metric = "Sensitivity")
+model163 <- train(y_CD163 ~ ., data=x.sub.CD163, method = "glm", family = "binomial", trControl = train_control, metric = "Sensitivity")
+```
+
+```{r}
+# Predictions for CD68 and CD163
+pred.CD68 <- predict(model68, newdata=x_CD68[-1])
+pred.CD163 <- predict(model163, newdata=x_CD163[-1])
+
+# Combined Predictions
+pred.CD68_163 <- factor((2 - as.numeric(pred.CD68)) + (2 - as.numeric(pred.CD163) * 2) + 1, 
+                        labels=c("DN", "CD68", "CD163", "DP"))
+ori.CD68_163 <- factor(as.numeric(CD68.pos) + as.numeric(CD163.pos) * 2 + 1, 
+                       labels=c("DN", "CD68", "CD163", "DP"))
+
+# Add Predictions to Metadata
+seurat_mac@meta.data$pred.CD68 <- pred.CD68
+seurat_mac@meta.data$pred.CD163 <- pred.CD163
+seurat_mac@meta.data$pred.CD68_163 <- pred.CD68_163
+
+seurat_mac@meta.data$ori.CD68 <- factor(raw.matrix["CD68",]>0,levels=c("TRUE","FALSE"))
+seurat_mac@meta.data$ori.CD163 <- factor(raw.matrix["CD163",]>0,levels=c("TRUE","FALSE"))
+seurat_mac@meta.data$ori.CD68_163 <- ori.CD68_163
+
+```
+
+### Visualizing predictions for CD68 and D163
+```{r}
+# Feature Plots for CD68 and CD163
+FeaturePlot(seurat_mac, feature = "CD68", label=FALSE, reduction = "umap", raster=FALSE) + ggplot2::ggtitle("CD68 (raw expression)")
+FeaturePlot(seurat_mac, feature = "CD163", label=FALSE, reduction = "umap", raster=FALSE) + ggplot2::ggtitle("CD163 (raw expression)")
+DimPlot(seurat_mac, group.by = "pred.CD68_163", label=FALSE, reduction = "umap", raster=FALSE) + ggplot2::ggtitle("CD68 and CD163 Positivity (Prediction with GLM)")
+
+DefaultAssay(seurat_mac) <- "RNA"
+p <- VlnPlot(seurat_mac, features = c("HLA-A"), group.by = "pred.CD68_163") +
+  ggplot2::ggtitle("HLA-A in macrophages")+
+  theme(legend.position = "none")
+
+pdf(file.path(fig_dir1, "HLA_stratified_by_CD68_CD163.pdf"),width=4,height=7)
+print(p)
+dev.off()
+
+```
+
+```{r}
+table(obs.CD68=seurat_mac$ori.CD68,pred.CD68=seurat_mac$pred.CD68)
+table(obs.CD163=seurat_mac$ori.CD163,pred.CD163=seurat_mac$pred.CD163)
+```
+
+### Saving the processed macrophage data
+```{r}
+save(seurat_mac, file=file.path(obj_dir1, "seurat_mac.RData"))
+```
