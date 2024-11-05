@@ -117,7 +117,7 @@ mm[] <- lapply(mm, as.integer)
 rownames(mm) <- meta.clinical$PATIENT_ID
 
 # Generate Venn diagram and save as PDF
-pdf(file.path(fig_dir, "3_prep_metabric", "metabric_brca_subtypes.pdf"), width = 7, height = 7)
+pdf(file.path(fig_dir, "03_METABRIC_prep", "metabric_brca_subtypes.pdf"), width = 7, height = 7)
 vennDiagram(as.matrix(mm), main = "METABRIC samples")
 dev.off()
 ```
@@ -168,7 +168,7 @@ meta.m3 <- meta.m3.cleaned[meta.syms, used.ids]
 ```
 #### Rownames in m1 and m3 are identical
 ```{r}
-identical(rownames(meta_m1),rownames(meta_m3))
+identical(rownames(meta.m1),rownames(meta.m3))
 ```
 
 
@@ -208,7 +208,7 @@ abline(v = exp.th, col = 2)
 
 #### Exemplar - HLA-A and HLA-C gene expression compared to all genes
 ```{r}
-pdf(file.path(fig_dir,"3_prep_metabric","prep_hlaa_exp1.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"03_METABRIC_prep","prep_hlaa_exp1.pdf"),width=7,height=7)
 par(mfrow=c(3,1))
 rng <- range(mm1[,],na.rm=T)
 x <- hist(mm1[,],breaks=1000,xlim=rng,border=NA,col="grey60",freq=TRUE,
@@ -266,23 +266,53 @@ lst <- parallel::mclapply(uniq.syms1, function(sym) {
   return(c(sym = sym, g = g, is.bg = is.bg, sig = max.sig, p1 = peaks[1], p2 = peaks[2], is.between = is.between))
 }, mc.cores = 4)
 
-saveRDS(lst,file.path(obj_dir,"1-4_prep","lst.rds"))
-
 # Convert list to a data frame
 lst1 <- as.data.frame(do.call(rbind, lst), stringsAsFactors = FALSE) %>%
   mutate(is.bg = as.logical(is.bg),
          sig = as.logical(sig),
          is.between = as.logical(is.between),
-         p1 = as.numeric(p1),
-         p2 = as.numeric(p2))
+         p1 = as.numeric(p1.1),
+         p2 = as.numeric(p2.2))
 
-```
-### Data for further analysis
-```{r}
+has.0 <- apply(mm1,1,function(xx)sum(xx < exp.th))
+med.0 <- apply(mm1,1,function(xx)median(xx))
+
 # Combine gene information and significant metrics for downstream analysis
 df <- cbind(lst1, median = med.0, n_samples_below_threshold = has.0) %>%
   mutate(difference = p2 - p1)
-df$is_between[is.na(df$is_between)] <- FALSE
+df$is.between[is.na(df$is.between)] <- FALSE
+
+n.smpls <- ncol(mm1)
+pts <- colnames(mm1)
+subtype <- rep(NA,length(pts))
+names(subtype) <- pts
+
+subtype[pts %in% meta.ids$hr] <- "hr"
+subtype[pts %in% meta.ids$her2] <- "her2"
+subtype[pts %in% meta.ids$dp] <- "dp"
+subtype[pts %in% meta.ids$tnbc] <- "tnbc"
+subtype <- factor(subtype,levels=c("hr","dp","her2","tnbc"))
+
+syms <- df$sym
+p.vals <- sapply(syms,function(sym){
+  df <- data.frame(exp=mm1[sym,],group=subtype)
+  res.aov <- aov(exp ~ group, data=df)
+  p.value <- summary(res.aov)[[1]][[5]][1]
+  return(p.value)
+})
+
+df1 <- df %>% 
+  mutate(p.val = p.vals) %>%
+  filter(!is.na(p2)) ## 24176 -> 18882 genes
+
+significant.genes <- df1 %>% 
+  filter(is.between == TRUE) %>%
+  filter(g==2 & is.bg==1 & sig) %>%
+  filter(median > exp.th) %>%
+  filter(p.val > 1e-20) %>%
+  filter(n_samples_below_threshold < n.smpls * .25) %>%
+  arrange(desc(difference)) # 52
+
 ```
 
 
@@ -321,7 +351,7 @@ meta.sig.df <- significant.genes # 20 genes
 
 save(meta.ids,meta.clinical,meta.syms,meta.m1,meta.m3,
      meta.exp.th,meta.df,meta.sig.df,
-     file=file.path(obj_dir,"1-4_prep","metabric_processed_v3.rda"))
+     file=file.path(obj_dir,"TCGA_META","metabric_processed.rda"))
 ```
 
 
