@@ -113,7 +113,7 @@ rownames(mm1) <- names(rm1[idx1])
 mm3 <- tcga_m3[idx1, used.ids]
 rownames(mm3) <- rownames(mm1)
 
-tcga_m1 <- mm1
+tcga.m1 <- mm1
 tcga.m3 <- mm3
 
 ```
@@ -138,10 +138,10 @@ mm <- with(tcga.clinical, cbind(
   `HER2+` = IHC_HER2 == "Positive"
 ))
 
-mm[] <- lapply(mm, as.integer)
+mm[] <- sapply(mm, as.integer)
 rownames(mm) <- tcga.clinical$PATIENT_ID
 
-pdf(file.path(fig_dir,"2_prep_tcga","tcga_brca_subtypes.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"02_TCGA_prep","tcga_brca_subtypes.pdf"),width=7,height=7)
 vennDiagram(mm,main="TCGA samples, by subtypes")
 dev.off()
 
@@ -151,5 +151,5 @@ dev.off()
 ```{r}
 # Save the relevant objects to a .rda file for easy loading in future analysis
 save(tcga.ids,tcga.clinical,tcga.syms,tcga.m1,tcga.m3,
-     file=file.path(obj_dir,"1-4_prep","tcga_processed_v3.rda"))
+     file=file.path(obj_dir,"TCGA_META","tcga_processed.rda"))
 ```
