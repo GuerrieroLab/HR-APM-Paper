@@ -36,7 +36,7 @@ gset <- gset[[idx]]
 
 #### module genes (`mods`)
 ```{r}
-mods <- readRDS(file=file.path(obj_dir,"1-4_prep","module_genes_final_122923.rds"))
+mods <- readRDS(file=file.path(obj_dir,"Gene_modules","module_genes_final.rds"))
 ```
 
 ### DE analysis functions
@@ -536,7 +536,7 @@ dev.off()
 
 ### biomarkers for different cell types
 ```{r}
-markers.wd <- readRDS(file=file.path(obj_dir,"15_dfbcc_snseq","markers_all_wehi_dfci_102824.rds"))
+markers.wd <- readRDS(file=file.path(obj_dir,"DFBCC_sn","markers_all_wehi_dfci_102824.rds"))
 
 th <- 1e-100
 m1 <- markers.wd %>%
@@ -774,7 +774,7 @@ dev.off()
 ## FGSEA - MSigDB 
 ### combine msigdb with mods
 ```{r}
-msigdb <- readRDS("/Users/kenichishimada/Dropbox (HMS)/_projects_/B06 03 HR-APM/manuscript/Rdata/5_pathway_analysis/msigdb.rds")
+msigdb <- readRDS(file.path(obj_dir,"Pathways","msigdb.rds"))
 
 syms1 <- out.res$GENE_SYMBOL
 mods1 <- lapply(mods,function(x){
@@ -950,8 +950,8 @@ if(0){
        sens.design,
        full_results_res,
        full_results_sens, 
-       file=file.path(obj_dir,"clinical","ACOSOG_data.rda"))
+       file=file.path(obj_dir,"ACOSOG","ACOSOG_data.rda"))
 }else{
-  x <-  load(file=file.path(obj_dir,"clinical","ACOSOG_data.rda"))
+  x <-  load(file=file.path(obj_dir,"ACOSOG","ACOSOG_data.rda"))
 }
 ```
