@@ -1,6 +1,6 @@
 ---
 title: "6. Looking into the correlation in different cancer types"
-output: html_notebook
+#output: html_notebook
 ---
 
 ## Initial setup
@@ -14,11 +14,7 @@ suppressPackageStartupMessages({
 
 ### Set paths
 ```{r}
-proj_dir="~/Dropbox (HMS)/_projects_/B06 03 HR-APM/"
-
-ccle_dir <- file.path(proj_dir,"data","ccle")
-fig_dir <- file.path(proj_dir,"manuscript","figs")
-obj_dir <- file.path(proj_dir,"manuscript","RData")
+ccle_dir <- file.path(data_dir,"CCLE")
 ```
 
 ## Load expresssion data (downloaded form cBioPortal)
@@ -41,6 +37,7 @@ Column names of the three matrices are identical.
 identical(colnames(ccle.mat1),colnames(ccle.mat2)) # true
 identical(colnames(ccle.mat1),colnames(ccle.mat3)) # true
 ```
+
 ## Pre-processing data
 ### Compare three expression matrices
 ```{r}
@@ -55,20 +52,6 @@ dim(ccle.m3) # 56318 genes, 1156 samples
 identical(ccle.mat1$Hugo_Symbol,ccle.mat2$Hugo_Symbol) # true
 ```
 
-
-```{r}
-syms12 <- intersect(ccle.mat1$Hugo_Symbol,ccle.mat2$Hugo_Symbol)
-i=4
-plot(ccle.m1[match(syms12,ccle.mat1$Hugo_Symbol)[i],],
-     ccle.m2[match(syms12,ccle.mat2$Hugo_Symbol)[i],],
-     pch=".")
-plot(ccle.m1[match(syms12,ccle.mat1$Hugo_Symbol)[i],],
-     ccle.m3[match(syms12,ccle.mat2$Hugo_Symbol)[i],],
-     pch=".")
-plot(ccle.m3[match(syms12,ccle.mat1$Hugo_Symbol)[i],],
-     ccle.m2[match(syms12,ccle.mat2$Hugo_Symbol)[i],],
-     pch=".")
-```
 ## Load Clinical data
 ```{r}
 cl <- readLines(file.path(ccle_dir,"data_clinical_sample.txt"))[-(1:4)]
@@ -83,8 +66,7 @@ if(0){
   table(used.ids %in% ccle.clinical$PATIENT_ID) ## all samples' records exist in clinical metadata
 }
 
-"%!in%" <- function(x, y) !(x %in% y)
-used.ids[used.ids %!in% ccle.clinical$PATIENT_ID] ## 3 samples' records don't exist in clinical metadata: "X253JBV_URINARY_TRACT" "X253J_URINARY_TRACT"   "X127399_SOFT_TISSUE"
+used.ids[!used.ids %in% ccle.clinical$PATIENT_ID] ## 3 samples' records don't exist in clinical metadata: "X253JBV_URINARY_TRACT" "X253J_URINARY_TRACT"   "X127399_SOFT_TISSUE"
 
 ```
 
@@ -136,14 +118,11 @@ ccle.lumb.ids <- (sub.ccle %>%
 ccle.luma.ids <- (sub.ccle %>% 
                     filter(PAM50.mRNA == "Luminal A"))$Cell.line.name # 10
 
-ccle.all.ids <- sub.ccle$Cell.line.name # 54 cell lines in total
-
 ccle.ids <- list(
   her2=ccle.her2.ids,
   bl=ccle.bl.ids,
   luma=ccle.luma.ids,
-  lumb=ccle.lumb.ids,
-  all = ccle.all.ids
+  lumb=ccle.lumb.ids
 )
 sapply(ccle.ids,length)
 ```
@@ -176,6 +155,6 @@ save(ccle.ids,
      ccle.m2.breast,
      ccle.m3.breast,
      sub.ccle,
-     file=file.path(obj_dir,"9_ccle","ccle_RNA-seq.rda"))
+     file=file.path(obj_dir,"CCLE","ccle_RNA-seq.rda"))
 ```
 

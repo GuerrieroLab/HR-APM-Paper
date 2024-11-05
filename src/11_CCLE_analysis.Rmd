@@ -3,6 +3,10 @@ title: "6. Looking into the correlation in different cancer types"
 #output: html_notebook
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
 ## Initial setup
 
 ### Load libraries
@@ -12,43 +16,30 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(heatmap3)
   library(ggplot2)
-  # library(ggrepel)
-  # library(Seurat)
   library(RColorBrewer)
-  # library(lme4)
   library(qvalue)
   library(viridis)
   library(ROCR)
   library(GSVA)
-  # library(fgsea)
 })
 source(file.path(src_dir,"utils","h3.R"))
 ```
 
 ### Set paths
 ```{r}
-obj_dir1 <- file.path(obj_dir,"10_visvader")
-fig_dir1 <- file.path(fig_dir,"10_visvader")
-
-fig_dir2 <- file.path(fig_dir,"9_ccle")
-obj_dir2 <- file.path(obj_dir,"9_ccle")
+fig_dir1 <- file.path(fig_dir,"11_CCLE_analysis")
 ```
 
 ### Load WEHI data
 
 ```{r}
-xxx <- load(file=file.path(obj_dir1,"color_schema.rda")) # exp.ct.cols1,st.uniq.cols,mod.cols
-x <- load(file=file.path(obj_dir1,"df_gn_exp_tum_102324.rda")) # mod.gns,df.tum.exp
-xx <- load(file=file.path(obj_dir1,"mod_activity_visvader_all_102324.rda")) # df.pts,df.ers
-
-# wp <- readRDS(file.path(obj_dir1,"visvader_seurat_all_subtypes_v3.rds"))
-# mat <- GetAssayData(wp)
-# mat <- mat[rownames(mat) %in% used.all.gns, ]
+load(file=file.path(obj_dir,"misc","color_schema.rda")) # exp.ct.cols1,st.uniq.cols,mod.cols
+x <-load(file=file.path(obj_dir,"WEHI","wehi_module_expressions.rda")) # mod.gns,df.tum.exp,df.pts
 ```
 
 ### Load CCLE data
 ```{r}
-x <- load(file.path(obj_dir2,"ccle_RNA-seq.rda")) ## ccle.syms, sub.ccle, ccle.m1.breast
+x <- load(file.path(obj_dir,"CCLE","ccle_RNA-seq.rda")) ## ccle.syms, sub.ccle, ccle.m1.breast
 table(sub.ccle$PAM50.mRNA) # 19/54 are Luminal
 table(mod.gns %in% ccle.syms) ## all genes found in ccle
 
@@ -64,7 +55,7 @@ identical(df.tum.exp$genes,names(med.ccle.exp)) # TRUE, order of genes in WEHI a
 df.tum.exp <- df.tum.exp[1:6] %>% cbind(ccle=med.ccle.exp[df.tum.exp$genes])
 ```
 
-## [Fig S6X - ROC] Define expressed genes in CCLE by setting threshold
+## Define expressed genes in CCLE by setting threshold
 
 ```{r}
 exp.pos <- df.tum.exp %>% filter(exp.tis =="Cancer") %>% pull(ccle)
@@ -79,13 +70,17 @@ df.roc <- data.frame(cut = perf@alpha.values[[1]], sens = perf@y.values[[1]], sp
 idx <- which.max(df.roc$sens + df.roc$spec)
 th <- df.roc$cut[idx]
 table(df.tum.exp$ccle > th)
+```
+
+### [Fig unused] ROC curve
+```{r}
 ttl <- paste0(
   "Threshold: ",round(th,3),"\n",
   "FPR:",round(1-df.roc$spec[idx],2),"\n",
   "TPR:",round(df.roc$sens[idx],2))
 # th <- threshold1(predictions,labels)
 
-pdf(file.path(fig_dir2,"ROC_curve.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"ROC_curve.pdf"),width=7,height=7)
 plot(1-df.roc$spec,
      df.roc$sens,
      xlab="False Positive Rate",
@@ -97,6 +92,7 @@ text(0.25,0.9,ttl,pos=1,col=2)
 dev.off()
 ```
 
+### [Fig S6A] consistency betwen WEHI and CCLE
 ```{r}
 df.tum.exp.2 <- df.tum.exp %>%
   mutate(cl.smpls = (exp.tis %in% c("T","NK"))*2 + (exp.tis %in% "Cancer")*1 + 1) %>%
@@ -110,7 +106,7 @@ dc <- densCols(df.tum.exp.2$tum.exp.1,df.tum.exp.2$ccle,nbin=128,
 
 pe <- cor(df.tum.exp.2$tum.exp.1,df.tum.exp.2$ccle,method="pe")
 
-pdf(file.path(fig_dir2,"plot_exp_in_ccle_and_cancer_cells.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"plot_exp_in_ccle_and_cancer_cells.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 plot(df.tum.exp.2$tum.exp.1,df.tum.exp.2$ccle,pch=20,cex=1,col=dc,
      xlab="In cancer cells, WEHI (log2)",
@@ -120,10 +116,9 @@ abline(h=th,lty=2)
 abline(h=0,v=0)
 text(1.5,2,paste0("PCC=",round(pe,3)))
 dev.off()
-
 ```
 
-#### [Fig S6B] violin plot - gene expression by cell type
+### [Fig S6B] violin plot - gene expression by cell type
 ```{r}
 df.tum.exp.1 <- df.tum.exp %>%
   group_by(exp.tis) %>%
@@ -143,12 +138,12 @@ p <- ggplot(df.tum.exp,aes(x=factor(exp.tis),y=ccle)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.position="none")
 
 set.seed(123)
-pdf(file.path(fig_dir2,"violin_ccle_expression_raw_042424.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"violin_ccle_expression_raw.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
 
-#### [Fig 3B] violin plot - gene expression by modules
+### [Fig 3B] violin plot - gene expression by modules
 ```{r}
 df.tum.exp.2 <- df.tum.exp %>%
   group_by(module) %>%
@@ -177,12 +172,12 @@ p <- ggplot(df.tum.exp,aes(x=module,y=ccle)) +
         legend.position="none")
 
 set.seed(123)
-pdf(file.path(fig_dir2,"violin_ccle_expression_module_042424.pdf"),width=4,height=7)
+pdf(file.path(fig_dir1,"violin_ccle_expression_module.pdf"),width=4,height=7)
 print(p)
 dev.off()
 ```
 
-## Subset `ccle.exp`
+### Subset `ccle.exp`
 
 ```{r}
 df.ccle.ct1 <- df.tum.exp %>% 
@@ -201,17 +196,10 @@ ccle.exp.graph <- ccle.exp1[,match(cell.annotation$Cell.line.name,colnames(ccle.
 groups<- cell.annotation$PAM50.mRNA
 ```
 
-### save data 
-
-```{r}
-save(df.ccle.ct1,ccle.exp1,rc1.sub,file=file.path(obj_dir1,"ccle_expressed_genes_042424.rda"))
-# xx <- load(file=file.path(obj_dir1,"ccle_expressed_genes_042424.rda"))
-```
-
 ## Correlation of gene expression (all samples)
 ```{r}
-ccle_cormat.all <- cor(t(ccle.exp.graph), use ="everything",method= "spearman")
-ccle_cormat.hr <- cor(t(ccle.exp.graph[,grep("Lumina",cell.annotation$PAM50)]), use ="everything",method= "pearson")
+ccle.cors.all <- cor(t(ccle.exp.graph), use ="everything",method= "spearman")
+ccle.cors.hr <- cor(t(ccle.exp.graph[,grep("Lumina",cell.annotation$PAM50)]), use ="everything",method= "pearson")
 ```
 
 ### [Fig S6C, 3D] check if they are positively or negatively correlated
@@ -219,7 +207,7 @@ ccle_cormat.hr <- cor(t(ccle.exp.graph[,grep("Lumina",cell.annotation$PAM50)]), 
 ```{r}
 rc1.sub <- mod.side.cols[df.ccle.ct1$sym,]
 
-hc.all <- heatmap3(ccle_cormat.all,distfun=dist,
+hc.all <- heatmap3(ccle.cors.all,distfun=dist,
           scale="none",
           balanceColor=TRUE,
           ColSideColors=rc1.sub,RowSideColors=rc1.sub)
@@ -235,7 +223,7 @@ m.all1 <- new.levs[m.all]
 ##
 cols <- colorRampPalette(c("navy", "white", "firebrick3"))(1024)
 
-hc.hr <- heatmap3(ccle_cormat.hr,distfun=dist,
+hc.hr <- heatmap3(ccle.cors.hr,distfun=dist,
           col=cols,scale="none",
           balanceColor=TRUE,
           ColSideColors=rc1.sub,RowSideColors=rc1.sub)
@@ -284,9 +272,9 @@ cons.gns <- list(ERS=ers.gns, # 18
 sapply(cons.gns,length)
 
 if(0){
-  saveRDS(cons.gns,file.path(obj_dir,"9_ccle","conserved_gns_v4.rds"))
+  saveRDS(cons.gns,file.path(obj_dir,"CCLE","conserved_gns.rds"))
 }else{
-  cons.gns <- readRDS(file.path(obj_dir,"9_ccle","conserved_gns_v4.rds"))
+  cons.gns <- readRDS(file.path(obj_dir,"CCLE","conserved_gns.rds"))
 }
 
 cons.gns.v <- rep(names(cons.gns),sapply(cons.gns,length))
@@ -296,24 +284,23 @@ cons <- rep("non_exp",nrow(df.ccle.ct1))
 names(cons) <- df.ccle.ct1$sym
 cons[names(cons.gns.v)] <- cons.gns.v
 df.ccle.ct1 <- df.ccle.ct1[1:7] %>% mutate(cons_gns = cons)
-
-saveRDS(df.ccle.ct1,file.path(obj_dir,"10_visvader","df_ccle_ct1_v3.rds"))
-
 ```
 
-#### correlation within each cell types in single-cell data?
+#### Correlation within each cell types
 
 ```{r}
-c.all <- ccle_cormat.all
-c.hr <- ccle_cormat.hr
+c.all <- ccle.cors.all
+c.hr <- ccle.cors.hr
 diag(c.all) <- diag(c.hr) <- NA
-mean.c.all <- sapply(cons.gns,function(x){
-  sapply(cons.gns,function(y){
+
+mean.c.all <- sapply(cons.gns[1:3],function(x){
+  sapply(cons.gns[1:3],function(y){
     mean(c.all[x,y],na.rm=T)
   })
 })
-mean.c.hr <- sapply(cons.gns,function(x){
-  sapply(cons.gns,function(y){
+
+mean.c.hr <- sapply(cons.gns[1:3],function(x){
+  sapply(cons.gns[1:3],function(y){
     mean(c.hr[x,y],na.rm=T)
   })
 })
@@ -330,46 +317,46 @@ names(cols1) <- -(max.rng):max.rng
 col.all <- cols1[as.character(seq(rng.all[1],rng.all[2]))]
 col.hr <- cols1[as.character(seq(rng.hr[1],rng.hr[2]))]
 
-##
 # lc <- c(brewer.pal(3,"Set1")[2],brewer.pal(3,"Dark2")[1:2],"white")
-lc <- c(brewer.pal(3,"Set1")[2],brewer.pal(3,"Dark2")[1:2],"white")
-names(lc) <- names(cons.gns)
+int.lc <- c(brewer.pal(3,"Set1")[2],brewer.pal(3,"Dark2")[1:2],"white")
+names(int.lc) <- names(cons.gns)[1:4]
 lcol <- rep("white",nrow(df.ccle.ct1))
 names(lcol) <- df.ccle.ct1$sym
-for(i in 1:4){
+for(i in 1:3){
   nm <- names(cons.gns)[i]
   tmp.gns <- cons.gns[[nm]]
-  lcol[tmp.gns] <- lc[nm]
+  lcol[tmp.gns] <- int.lc[nm]
 }
 
 rc2.sub <- cbind(rc1.sub,conserved=lcol)
 
-pdf(file=file.path(fig_dir2,"v2","heatmap_ccle_cormat_all_042424.pdf"),height=7,width=7)
-hc.all <- heatmap3(ccle_cormat.all,distfun=dist,
+pdf(file=file.path(fig_dir1,"heatmap_ccle_cormat_all.pdf"),height=7,width=7)
+hc.all <- heatmap3(ccle.cors.all,distfun=dist,
           scale="none",main="ALL",
           balanceColor=TRUE,
           ColSideColors=rc2.sub,RowSideColors=rc2.sub)
 dev.off()
 
-pdf(file=file.path(fig_dir2,"v2","heatmap_ccle_cormat_hr_042424.pdf"),height=7,width=7)
-hc.hr <- heatmap3(ccle_cormat.hr,distfun=dist,
+pdf(file=file.path(fig_dir1,"heatmap_ccle_cormat_hr.pdf"),height=7,width=7)
+hc.hr <- heatmap3(ccle.cors.hr,distfun=dist,
           scale="none",main="HR+",
           balanceColor=TRUE,
           ColSideColors=rc2.sub,RowSideColors=rc2.sub)
 dev.off()
 
-write.csv(round(mean.c.all,3),file.path(fig_dir2,"v2","heatmap_mean_ccle_cormat_all_042424.csv"))
-write.csv(round(mean.c.hr,3),file.path(fig_dir2,"v2","heatmap_mean_ccle_cormat_hr_042424.csv"))
-pdf(file=file.path(fig_dir2,"v2","heatmap_mean_ccle_cormat_all_042424.pdf"),height=7,width=7)
+write.csv(round(mean.c.all,3),file.path(fig_dir1,"heatmap_mean_ccle_cormat_all.csv"))
+write.csv(round(mean.c.hr,3),file.path(fig_dir1,"heatmap_mean_ccle_cormat_hr.csv"))
+
+pdf(file=file.path(fig_dir1,"heatmap_mean_ccle_cormat_all.pdf"),height=7,width=7)
 h3(mean.c.all,Colv=NA,Rowv=NA,scale="none",#balanceColor=TRUE,
    margins=c(7,7),main="ALL",col=col.all,
-   ColSideColors=cbind(conserved=lc),RowSideColors=cbind(conserved=lc))
+   ColSideColors=cbind(conserved=int.lc[1:3]),RowSideColors=cbind(conserved=int.lc[1:3]))
 dev.off()
 
-pdf(file=file.path(fig_dir2,"v2","heatmap_mean_ccle_cormat_hr_042424.pdf"),height=7,width=7)
+pdf(file=file.path(fig_dir1,"heatmap_mean_ccle_cormat_hr.pdf"),height=7,width=7)
 h3(mean.c.hr,Colv=NA,Rowv=NA,scale="none",#balanceColor=TRUE,
    margins=c(7,7),main="HR+", col=col.hr,
-   ColSideColors=cbind(conserved=lc),RowSideColors=cbind(conserved=lc))
+   ColSideColors=cbind(conserved=int.lc[1:3]),RowSideColors=cbind(conserved=int.lc[1:3]))
 dev.off()
 ```
 
@@ -395,7 +382,7 @@ norm.ccle.exp.graph <- t(apply(ccle.exp.graph,1,function(x){
 #Plot heatmap for CCLE PAM50
 ri <- rev(unlist(cons.gns[1:3]))
 
-pdf(file=file.path(fig_dir2,"v2","ccle_heatmap_all_042424.pdf"),width=7,height=7)
+pdf(file=file.path(fig_dir1,"ccle_heatmap_all.pdf"),width=7,height=7)
 heatmap_ccle<- heatmap3(norm.ccle.exp.graph[ri,],
           col=cols,scale="none",
           Rowv=NA,Colv=NA,
@@ -436,7 +423,7 @@ norm.ccle.exp.graph <- t(apply(ccle.exp.graph[,is.used],1,function(x){
 ri <- rev(unlist(cons.gns[1:3]))
 
 o <- order(colMeans(norm.ccle.exp.graph[cons.gns[[1]],]),decreasing=T)
-pdf(file=file.path(fig_dir2,"v2","ccle_heatmap_luminal_042424.pdf"),width=7,height=7)
+pdf(file=file.path(fig_dir1,"ccle_heatmap_luminal.pdf"),width=7,height=7)
 heatmap_ccle<- heatmap3(norm.ccle.exp.graph[ri,o],
           col=cols,scale="none",
           Rowv=NA,Colv=NA,
@@ -454,7 +441,7 @@ dev.off()
 
 ```
 
-### extend conserved genes
+### Extend conserved genes
 ```{r}
 tnf.tnf <- intersect(cons.gns$`TNFa/NFkB`,mods$`TNFa/NFkB`)
 tnf.apm <- intersect(cons.gns$`TNFa/NFkB`,mods$`APM/TC`)
@@ -471,19 +458,18 @@ cons.gns.1 <- c(cons.gns[-1],
 ```
 #### save `cons.gns.1`
 ```{r}
-saveRDS(cons.gns.1,file.path(obj_dir2,"intrinsic_modules.rds"))
+saveRDS(cons.gns.1,file.path(obj_dir,"Gene_modules","intrinsic_modules.rds"))
 ```
 
 
-## [Fig S6E] Pathway Enrichment (Fisher's test)
+## Pathway Enrichment (Fisher's test)
 ```{r}
-msigdb <- readRDS(file.path(obj_dir,"5_pathway_analysis","msigdb.rds"))
-# msigdb.reg <- readRDS(file.path(obj_dir,"5_pathway_analysis","msigdb_reg.rds"))
+msigdb <- readRDS(file.path(obj_dir,"Pathways","msigdb.rds"))
 ```
 
 ### subsetting `msigdb`
 ```{r}
-tested.gns <- readRDS(file.path(obj_dir,"1-4_prep","common_tested_gns.rds")) # 15397
+tested.gns <- readRDS(file.path(obj_dir,"TCGA_META","common_tested_gns.rds")) # 15397
 tested.ccle.gns <- intersect(tested.gns,ccle.syms) # 15089
 
 ms.gns <- unique(unlist(msigdb))
@@ -498,7 +484,7 @@ msigdb.2 <- msigdb.1[ge10] # 11375
 all.genes <- intersect(unique(unlist(msigdb.2)),tested.ccle.gns) # 13196
 ```
 
-### Fisher's exact test
+#### Fisher's exact test
 ```{r}
 sig.gns <- cons.gns.1
 
@@ -522,35 +508,17 @@ nlqs <- do.call(cbind,nlqs_list) %>%
   as.data.frame() %>%
   tibble::rownames_to_column("gene_set")# %>% filter(gene_set != "HALLMARK_INTERFERON_GAMMA_RESPONSE")
 
-# th <- 3
-# if(0){
-#   sapply(nlqs[-1],function(x)sum(x>th))
-#   
-#   nlqs %>% filter(ERS > th & NON_CORR < th) %>% arrange(desc(ERS))
-#   
-#   module1 <- (nlqs %>% filter(`TNFa/NFkB` > th & `IFN-I` < th & NON_CORR < th) %>% arrange(desc(`TNFa/NFkB`)))$gene_set
-#   intersect(msigdb.2[["HALLMARK_COMPLEMENT"]],sig.gns$`TNFa/NFkB`) # HALLMARK_INTERFERON_ALPHA_RESPONSE
-#   intersect(msigdb.2[["HALLMARK_COAGULATION"]],sig.gns$`TNFa/NFkB`) # HALLMARK_INTERFERON_ALPHA_RESPONSE
-#   
-#   head(nlqs %>% filter(`TNFa/NFkB` < th & `IFN-I` > th & NON_CORR < th) %>% arrange(desc(`IFN-I`)),10)
-#   intersect(msigdb.2[["HALLMARK_INTERFERON_ALPHA_RESPONSE"]],sig.gns$`IFN-I`) # HALLMARK_INTERFERON_ALPHA_RESPONSE
-#   
-#   nlqs %>% filter(`APM/TC` > th & NON_CORR > th) %>% arrange(desc(`APM/TC`))
-#   head(nlqs %>% filter(`APM/TC` < th & NON_CORR > th) %>% arrange(desc(`APM/TC`)),20)
-#   intersect(msigdb.2[["GOBP_REGULATION_OF_T_CELL_ACTIVATION"]],sig.gns$non_corr) # c("GOMF_MHC_PROTEIN_COMPLEX_BINDING","GOBP_REUGLATION_OF_T_CELL_ACTIVATION")
-# }
 ```
 
 ### [Fig S6E left] pathways enriched in non-correalted
 ```{r}
-##
 th <- 3
 pars <- c("correlated","non_correlated")
 nlqs.1 <- nlqs %>% mutate(idx= factor(pars[(NON_CORR_IMM > th) + 1],levels=pars))
 nlqs.1 %>% filter(idx=="non_correlated") %>% pull(gene_set)
 
 #
-pdf(file=file.path(fig_dir2,"v2","fisher_corr_vs_noncorr_v2.pdf"),width=7,height=7)
+pdf(file=file.path(fig_dir1,"fisher_corr_vs_noncorr.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 plot(nlqs$`CORR_IMM`,nlqs$NON_CORR_IMM,type="n",
      xlab="-log10(Q-value), genes correlated in cell lines",
@@ -566,12 +534,11 @@ dev.off()
 
 ## export table
 nlqs.2 <- nlqs.1 %>% filter(NON_CORR_IMM > th) %>% arrange(desc(NON_CORR_IMM))
-write.csv(nlqs.2,file.path(table_dir,"module_non_corr_v3.csv"))
-write.csv(nlqs.3.out,file.path(fig_dir2,"v2","fisher_ifn_sub_vs_apm_sub_v2.csv"))
+write.csv(nlqs.2,file.path(fig_dir1,"module_non_corr.csv"))
 
 ```
 
-
+### [Fig S6E right] pathways enriched in intrinsic modules
 ```{r}
 th2 <- 5
 nlqs.3 <- nlqs.1 %>%
@@ -580,7 +547,7 @@ nlqs.3 <- nlqs.1 %>%
   arrange(desc(idx),desc(`TNFa/NFkB`),desc(`IFN-I`))
 
 ##
-pdf(file=file.path(fig_dir2,"v2","fisher_tnf_vs_ifn_v2.pdf"),width=7,height=7)
+pdf(file=file.path(fig_dir1,"fisher_tnf_vs_ifn.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 plot(nlqs.3$`TNFa/NFkB`,nlqs.3$`IFN-I`,type="n",
      xlab="-log10(Q-value), TNFa/NFkB intrinsic module",
@@ -597,7 +564,7 @@ dev.off()
 nlqs.4 <- nlqs.3 %>% filter(`IFN-I` > th2) %>%
   mutate(idx2=factor((IFN_sub > th2) * 2 + (APM_sub > th2)+1)) %>%
   arrange(desc(idx2),desc(IFN_sub),desc(APM_sub))
-pdf(file=file.path(fig_dir2,"v2","fisher_ifn_sub_vs_apm_sub_v2.pdf"),width=7,height=7)
+pdf(file=file.path(fig_dir1,"fisher_ifn_sub_vs_apm_sub.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 plot(nlqs.4$IFN_sub,nlqs.4$APM_sub,type="n",
      xlab="-log10(Q-value), IFN_sub intrinsic module",
@@ -616,7 +583,12 @@ nlqs.3.out <- nlqs.3 %>% filter(idx!=1) %>%
   arrange(idx,desc(`IFN-I`))
 
 ##
-write.csv(nlqs.3.out,file.path(fig_dir2,"v2","fisher_ifn_sub_vs_apm_sub_v2.csv"))
+write.csv(nlqs.3.out,file.path(fig_dir1,"fisher_ifn_sub_vs_apm_sub.csv"))
+```
+### save data 
+
+```{r}
+save(df.ccle.ct1,ccle.exp1,rc1.sub,file=file.path(obj_dir,"CCLE","ccle_module_expression.rda"))
 ```
 
 
