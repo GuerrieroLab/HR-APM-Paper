@@ -16,11 +16,11 @@ suppressPackageStartupMessages({
 
 ### Load data
 ```{r}
-coarse.mods <- readRDS(file=file.path(obj_dir,"1-4_prep","modules3_ers_immune_cc.rds"))
-final.mods <- readRDS(file.path(obj_dir,"1-4_prep","module_genes_final_122923.rds"))
+coarse.mods <- readRDS(file=file.path(obj_dir,"Gene_modules","modules3_ers_immune_cc.rds"))
+final.mods <- readRDS(file.path(obj_dir,"Gene_modules","module_genes_final.rds"))
 final.mods <- c(final.mods, coarse.mods[2:3])
 
-tested.gns <- readRDS(file=file.path(obj_dir,"1-4_prep","common_tested_gns_v3.rds"))
+tested.gns <- readRDS(file=file.path(obj_dir,"TCGA_META","common_tested_gns.rds"))
 
 sapply(final.mods,length)
 ```
@@ -50,16 +50,9 @@ if(0){
   ans <- sub("_.+","",names(msigdb))
   msigdb <- msigdb[ans %in% c("HALLMARK","GOBP","GOMF","GOCC","KEGG","REACTOME","BIOCARTA")]
   
-  saveRDS(msigdb,file.path(obj_dir,"5_pathway_analysis","msigdb.rds"))
-  
-  reg0 <- strsplit(readLines(file.path(msigdb_dir,"c3.all.v2023.1.Hs.symbols.gmt")),"\\t")
-  msigdb.reg0 <- lapply(reg0,function(x)x[-(1:2)])
-  names(msigdb.reg0) <- sapply(reg0,function(x)x[1])
-  
-  saveRDS(msigdb.reg0,file.path(obj_dir,"5_pathway_analysis","msigdb_reg.rds"))
-  
+  saveRDS(msigdb,file.path(obj_dir,"Pathways","msigdb.rds"))
 }else{
-  msigdb <- readRDS(file.path(obj_dir,"5_pathway_analysis","msigdb.rds"))
+  msigdb <- readRDS(file.path(obj_dir,"Pathways","msigdb.rds"))
 }
 ```
 
@@ -87,6 +80,7 @@ comm.gns <- lapply(final.mods,function(x){
 
 names(comm.gns) <- sub("/","",names(comm.gns))
 ```
+
 ```{r}
 ## keep only HALLMARKs
 msigdb.2 <- msigdb.2[grepl("^HALLMARK",names(msigdb.2))]
@@ -149,6 +143,6 @@ df1 <- df %>%
   mutate(pathway=tolower(gsub("_"," ",pathway)))
   
 wb1 <- openxlsx::buildWorkbook(df1)
-openxlsx::saveWorkbook(wb1,file.path(fig_dir,"Table_S2_1_pathways_gene_modules_v3.xlsx"),overwrite=T)
+openxlsx::saveWorkbook(wb1,file.path(fig_dir,"05_TCGA_METABRIC_pathway_analysis","Table_S2_1_pathways_gene_modules_v3.xlsx"),overwrite=T)
 
 ```

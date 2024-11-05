@@ -15,21 +15,26 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(tidyr)
   library(ROCR)
+  library(MASS)
 })
+source(file.path(src_dir,"utils","plot_module_scores.R"))
 ```
 
 
 ### Load data
 ```{r}
 # Load required data
-load(file.path(obj_dir, "1-4_prep", "tcga_processed_v3.rda"))
-load(file.path(obj_dir, "1-4_prep", "metabric_processed_v3.rda"))
-load(file.path(obj_dir, "1-4_prep", "tcga_metabric_cors.rda"))
-load(file.path(obj_dir, "1-4_prep", "heatmap_sidecols.rda"))
+x <- load(file.path(obj_dir, "TCGA_META", "tcga_processed.rda"))
+load(file.path(obj_dir, "TCGA_META", "metabric_processed.rda"))
+load(file.path(obj_dir, "TCGA_META", "tcga_metabric_cors.rda"))
+load(file.path(obj_dir, "misc", "heatmap_sidecols.rda"))
 
-tested.gns <- intersect(tcga.syms, meta.syms)
-sigs <- readRDS(file.path(obj_dir, "1-4_prep", "modules3_ers_immune_cc.rds"))
-comm.gns <- unlist(sigs[1:2])
+tested.gns <- readRDS(file.path(obj_dir, "TCGA_META", "common_tested_gns.rds"))
+
+sigs <- readRDS(file.path(obj_dir, "Gene_modules", "modules3_ers_immune_cc.rds"))
+mod.gns <- readRDS(file.path(obj_dir,"Gene_modules","module_genes_final.rds"))
+comm.gns <- unlist(sigs[c(1,3)])
+
 hallmarks <- c("ESR1", "CD8A", "HLA-A")
 ```
 
@@ -58,8 +63,7 @@ hc <- heatmap3(tmp,
 comm.gns <- comm.gns[hc$hcr$order]
 
 for(cl in smpl.class){
-  pdf(file.path(fig_dir,"6_heatmap_bc_subtypes",paste0("tcga_",cl,"_v4.pdf")),
-      width=7,height=7)	
+  pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","heatmap",paste0("tcga_",cl,"_v4.pdf")),width=7,height=7)	
 	par(cex.main=3)
 
 	tmp1 <- tcga.sp[[cl]][comm.gns,comm.gns]
@@ -80,6 +84,7 @@ for(cl in smpl.class){
 }
 
 ```
+
 #### [Fig 1E] Heatmap of mean module gene correlates
 ```{r}
 mean.tcga.sp <- list()
@@ -100,7 +105,7 @@ for(cl in smpl.class){
   n.max.cor.1 <- round(max(abs(mean.tcga.sp[[cl]]))*100)
   cols1 <- cols[(-100:100) %in% seq(-n.max.cor.1,n.max.cor.1)]
   if(1){
-    pdf(file.path(fig_dir,"6_heatmap_bc_subtypes",paste0("mean_tcga_",cl,"_v2.pdf")),
+    pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","heatmap",paste0("mean_tcga_",cl,"_v2.pdf")),
         width=7,height=7)
     hc.t <- heatmap3(mean.tcga.sp[[cl]][idx,idx],Rowv=NA,Colv=NA,
               col=cols1,scale="none",distfun=dist,
@@ -125,7 +130,7 @@ tmp <- meta.sp$hr[comm.gns,comm.gns]
 cols <- colorRampPalette(c("navy", "white", "firebrick3"))(1024)
 
 for(cl in smpl.class){
-  pdf(file.path(fig_dir,"6_heatmap_bc_subtypes",paste0("meta_",cl,"_v2.pdf")),width=7,height=7)	
+  pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","heatmap",paste0("meta_",cl,"_v2.pdf")),width=7,height=7)	
 	par(cex.main=3)
 
 	tmp <- meta.sp[[cl]][comm.gns,comm.gns]
@@ -166,7 +171,7 @@ for(cl in smpl.class){
   n.max.cor.1 <- round(max(abs(mean.meta.sp[[cl]]))*100)
   cols1 <- cols[(-100:100) %in% seq(-n.max.cor.1,n.max.cor.1)]
   
-  pdf(file.path(fig_dir,"6_heatmap_bc_subtypes",paste0("mean_meta_",cl,"_v2.pdf")),
+  pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","heatmap",paste0("mean_meta_",cl,"_v2.pdf")),
       width=7,height=7)
   hc.t <- heatmap3(mean.meta.sp[[cl]][idx,idx],Rowv=NA,Colv=NA,
             col=cols1,scale="none",distfun=dist,
@@ -311,34 +316,30 @@ dfx1 <- dfx.tcga %>% select(-2) %>% unique()
 
 
 #### [Fig S1G-I] Violin plot
-```{r}
-xx <- source(file.path(src_dir,"utils","subtype_violin_plot.R"))
-```
-
 
 ```{r}
-p <- subtype_violin_within(dfx=dfx.tcga,mod="ERS") + ggtitle("ERS (TCGA)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_ers_v2.pdf"),width=3,height=6)
+p <- subtype_activity_plot_within(dfx=dfx.tcga,mod="ERS") + ggtitle("ERS (TCGA)")
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","tcga_ers_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
 p <- subtype_violin_within(dfx=dfx.tcga,mod="IMMUNE") + ggtitle("Pan-immune (TCGA)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_imms_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","tcga_imms_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
 p <- subtype_violin_within(dfx=dfx.tcga,mod="TNFA.NFKB") + ggtitle("TNFa/NFkB (TCGA)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_imm1_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","tcga_imm1_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
 p <- subtype_violin_within(dfx=dfx.tcga,mod="IFN.I") + ggtitle("IFN-I (TCGA)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_imm2_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","tcga_imm2_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
 p <- subtype_violin_within(dfx=dfx.tcga,mod="APM.TC") + ggtitle("APM/TC (TCGA)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_imm3_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","tcga_imm3_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 ```
@@ -346,22 +347,22 @@ dev.off()
 
 ```{r}
 p <- subtype_violin_between(dfx=dfx.tcga,mod="TNFA.NFKB") + ggtitle("ERS vs Pan-immune (TCGA)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_ers_imm1_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","tcga_ers_imm1_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
 p <- subtype_violin_between(dfx=dfx.tcga,mod="TNFA.NFKB") + ggtitle("ERS vs TNFa/NFkB (TCGA)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_ers_imm1_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","tcga_ers_imm1_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
 p <- subtype_violin_between(dfx=dfx.tcga,mod="IFN.I") + ggtitle("ERS vs IFN-I (TCGA)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_ers_imm2_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","tcga_ers_imm2_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
 p <- subtype_violin_between(dfx=dfx.tcga,mod="APM.TC") + ggtitle("ERS vs APM/TC (TCGA)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","tcga_ers_imm3_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","tcga_ers_imm3_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 ```
@@ -498,27 +499,27 @@ dfx1 <- dfx.meta %>% select(-2) %>% unique()
 #### [Fig S1G-I] Violin plot
 ```{r}
 p <- subtype_violin_within(dfx=dfx.meta,mod="ERS") + ggtitle("ERS (METABRIC)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_ers_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","meta_ers_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
 p <- subtype_violin_within(dfx=dfx.meta,mod="IMMUNE") + ggtitle("Pan-immune (METABRIC)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_imms_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","meta_imms_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
 p <- subtype_violin_within(dfx=dfx.meta,mod="TNFA.NFKB") + ggtitle("TNFa/NFkB (METABRIC)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_imm1_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","meta_imm1_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
 p <- subtype_violin_within(dfx=dfx.meta,mod="IFN.I") + ggtitle("IFN-I (METABRIC)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_imm2_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","meta_imm2_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
 p <- subtype_violin_within(dfx=dfx.meta,mod="APM.TC") + ggtitle("APM/TC (METABRIC)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_imm3_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","meta_imm3_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 ```
@@ -526,59 +527,54 @@ dev.off()
 
 ```{r}
 p <- subtype_violin_between(dfx=dfx.meta,mod="TNFA.NFKB") + ggtitle("ERS vs Pan-immune (METABRIC)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_ers_imm1_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","meta_ers_imm1_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
 p <- subtype_violin_between(dfx=dfx.meta,mod="TNFA.NFKB") + ggtitle("ERS vs TNFa/NFkB (METABRIC)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_ers_imm1_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","meta_ers_imm1_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
 p <- subtype_violin_between(dfx=dfx.meta,mod="IFN.I") + ggtitle("ERS vs IFN-I (METABRIC)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_ers_imm2_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","meta_ers_imm2_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
 p <- subtype_violin_between(dfx=dfx.meta,mod="APM.TC") + ggtitle("ERS vs APM/TC (METABRIC)")
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_ers_imm3_v2.pdf"),width=3,height=6)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","meta_ers_imm3_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 ```
 
 ###  ESR1 expression per subclass
-```{r}
-threshold1 <- function(predict, response) {
-    perf <- ROCR::performance(ROCR::prediction(predict, response), "sens", "spec")
-    df <- data.frame(cut = perf@alpha.values[[1]], sens = perf@x.values[[1]], spec = perf@y.values[[1]])
-    df[which.max(df$sens + df$spec), "cut"]
-} 
-```
 
 #### 1D/2D plots - functions
-```{r}
-xx <- source(file.path(src_dir,"utils","plot_module_scores.R"))
-```
 
 
 ### [Fig S2E] METABRIC
 ```{r}
-ers.exp <- meta.m3[match("ESR1",meta.syms),unlist(meta.ids[c("hr","dp","tnbc","her2")])]
-cls <- factor(rep(subtypes,sapply(meta.ids[c("hr","dp","tnbc","her2")],length)),
+ers.exp <- meta.m3[match("ESR1",meta.syms),unlist(meta.ids[c(1,3,4,2)])]
+cls <- factor(rep(subtypes,sapply(meta.ids[c(1,3,4,2)],length)),
 	levels=subtypes)
 
-df.m <- data.frame(esr1=ers.exp,class=cls)
+df.m <- data.frame(ESR1=ers.exp,mod=cls) %>%
+  mutate(is.hr = factor(mod %in% c("HR+/HER2-","HR+/HER2+"),levels=c(TRUE,FALSE)))
 
-exp.pos <- (df.m %>% filter(class %in% c("HR+/HER2-","HR+/HER2+")))$esr1
-exp.neg <- (df.m %>% filter(class %in% c("HR-/HER2-","HR-/HER2+")))$esr1
-
+exp.pos <- (df.m %>% filter(mod %in% c("HR+/HER2-","HR+/HER2+")))$ESR1
+exp.neg <- (df.m %>% filter(mod %in% c("HR-/HER2-","HR-/HER2+")))$ESR1
 
 predictions <- c(exp.pos,exp.neg)
 labels <- rep(c(1,-1),c(length(exp.pos),length(exp.neg)))
 
 th <- threshold1(predictions,labels)
 
-pdf(file.path(fig_dir,"6_violin_bc_subtypes","meta_esr1_bc_subtypes.pdf"),width=4,height=7)
+p <- my_plot_d1(data=df.m,x1="ESR1") + ggtitle("ESR1 gene (METABRIC)") + ylab("Expression (log, z-score)")
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","meta_esr1_bc_subtypes.pdf"),width=4,height=7)
+print(p)
+dev.off()
+
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","meta_esr1_bc_subtypes.pdf"),width=4,height=7)
 p <- ggplot(df.m,aes(class,esr1)) + 
 	geom_violin(fill='grey80') +
 	geom_jitter(height = 0, width = 0.2,size=.5) +
@@ -612,10 +608,10 @@ lst.meta.gs[[mth]] <-  GSVA::gsva(expr = meta.m3[tested.gns,],
              min.sz = 10, max.sz = 500, kcdf = "Gaussian")
 
 if(0){
-  # save(lst.tcga.gs,lst.meta.gs,file=file.path(obj_dir,"1-4_prep","tcga_meta_ssgsea_scores_v2.rda"))
-  save(lst.tcga.gs,lst.meta.gs,file=file.path(obj_dir,"1-4_prep","tcga_meta_ssgsea_scores_zscore.rda"))  
+  # save(lst.tcga.gs,lst.meta.gs,file=file.path(obj_dir,"TCGA_META","tcga_meta_ssgsea_scores_v2.rda"))
+  save(lst.tcga.gs,lst.meta.gs,file=file.path(obj_dir,"TCGA_META","tcga_meta_ssgsea_scores_zscore.rda"))  
 }else{
-  x <- load(file.path(obj_dir,"1-4_prep","tcga_meta_ssgsea_scores_zscore.rda"))  
+  x <- load(file.path(obj_dir,"TCGA_META","tcga_meta_ssgsea_scores_zscore.rda"))  
 }
 ```
 
@@ -624,7 +620,13 @@ if(0){
 df.gs <- t(lst.tcga.gs[["zscore"]])  %>% 
   as.data.frame() %>%
   tibble::rownames_to_column("smpl")
-names(df.t) <- c("ESR1","class")
+
+df.t <- data.frame(ESR1=tcga.m3["ESR1",unlist(tcga.ids[c(1,3,4,2)])],
+                   class=factor(rep(names(tcga.ids[c(1,3,4,2)]),sapply(tcga.ids[c(1,3,4,2)],length)),
+                                levels=c("hr","dp","tnbc","her2"),
+                                labels=subtypes))# %>%
+
+
 df.t1 <- df.t %>% 
   tibble::rownames_to_column("smpl") %>% 
   left_join(df.gs,by="smpl") %>%
@@ -635,7 +637,7 @@ scc <- round(cor(df.t1$ERS,df.t1$CC,method="spearman"),2)
 dc <- densCols(df.t1[,c("ERS","CC")])
 
 ##
-pdf(file.path(fig_dir,"2_prep_tcga","tcga_ers_vs_cc_hr.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","tcga_ers_vs_cc_hr.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 plot(df.t1[,"ERS"], df.t1[,"CC"],pch=20,col=dc,
      main=paste0("ERS vs CC (HR+/HER2-,TCGA)"),
@@ -648,7 +650,7 @@ dev.off()
 
 #### ESR1 threshold
 ```{r}
-esr1.exp <- tcga.m3[match("ESR1",tcga.syms),unlist(tcga.ids[c(1,3,2,4)])]
+esr1.exp <- tcga.m3[match("ESR1",tcga.syms),unlist(tcga.ids[c(1,3,4,2)])]
 
 df0 <- data.frame(ESR1=esr1.exp) %>% tibble::rownames_to_column("id")
 df2 <- data.frame(id=unlist(tcga.ids),mod=rep(names(tcga.ids),sapply(tcga.ids,length))) %>%
@@ -717,7 +719,7 @@ df1 <- df1 %>%
 
 ```{r}
 p <- my_plot_d1(data=df1,x1="ESR1") + ggtitle("ESR1 gene (TCGA)") + ylab("Expression (log, z-score)")
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_violin_esr1.pdf"),width=4,height=8)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","tcga_violin_esr1.pdf"),width=4,height=8)
 print(p)
 dev.off()
 ```
@@ -737,10 +739,11 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3_th(data=df1,x1="ESR1",x2="ERS",draw.th=T,x.th="ESR1") +
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_esr1_vs_ers_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","tcga_esr1_vs_ers_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
+
 #### [Fig. 1F] between immune modules
 ```{r}
 ers.pos <- (df1 %>% filter(mod %in% c("HR+/HER2-","HR+/HER2+")))$ERS
@@ -760,7 +763,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3(data=df1,x1="TNFa.NFkB",x2="APM.TC",draw.th=F,x.th="ERS",split.lm=TRUE)+
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_imm1_vs_imm3_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","tcga_imm1_vs_imm3_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -781,7 +784,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3(data=df1,x1="IFN.I",x2="APM.TC",draw.th=F,x.th="ERS")+
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_imm2_vs_imm3_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","tcga_imm2_vs_imm3_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -803,7 +806,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3_th(data=df1,x1="TNFa.NFkB",x2="IFN.I",draw.th=T,x.th="ERS") +
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_imm1_vs_imm2_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","tcga_imm1_vs_imm2_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -874,7 +877,7 @@ p <- ggplot(df1,aes(x=cat,y=APM.TC)) +
     axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
     legend.position="none")  
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_violin_imm.pdf"),width=5,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","tcga_violin_imm.pdf"),width=5,height=7)
 print(p)
 dev.off()
 
@@ -900,7 +903,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3(data=df1,x1="ESR1",x2="ERS",draw.th=TRUE,x.th="ESR1",split.lm=TRUE) +
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_esr1_vs_ers_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","tcga_esr1_vs_ers_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -921,7 +924,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3(data=df1,x1="ERS",x2="TNFa.NFkB",draw.th=TRUE,x.th="ERS",split.lm=TRUE)+
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_imm1_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","tcga_ers_vs_imm1_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -941,7 +944,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3(data=df1,x1="ERS",x2="IFN.I",draw.th=TRUE,x.th="ERS",split.lm=TRUE)+
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_imm2_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","tcga_ers_vs_imm2_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -961,7 +964,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3(data=df1,x1="ERS",x2="APM.TC",draw.th=TRUE,x.th="ERS",split.lm=TRUE)+
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","tcga_ers_vs_imm3_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","tcga_ers_vs_imm3_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -977,7 +980,7 @@ summary(lm1)$coefficient
 
 #### ESR1 threshold
 ```{r}
-esr1.exp <- meta.m3[match("ESR1",meta.syms),unlist(meta.ids[c(1,3,2,4)])]
+esr1.exp <- meta.m3[match("ESR1",meta.syms),unlist(meta.ids[c(1,3,4,2)])]
 
 df0 <- data.frame(ESR1=esr1.exp) %>% tibble::rownames_to_column("id")
 df2 <- data.frame(id=unlist(meta.ids),mod=rep(names(meta.ids),sapply(meta.ids,length))) %>%
@@ -1046,7 +1049,7 @@ df1 <- df1 %>%
 
 ```{r}
 p <- my_plot_d1(data=df1,x1="ESR1") + ggtitle("ESR1 gene (METABRIC)") + ylab("Expression (log, z-score)")
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_violin_esr1.pdf"),width=4,height=8)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","meta_violin_esr1.pdf"),width=4,height=8)
 print(p)
 dev.off()
 ```
@@ -1066,7 +1069,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3_th(data=df1,x1="ESR1",x2="ERS",draw.th=T,x.th="ESR1") +
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_esr1_vs_ers_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","meta_esr1_vs_ers_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -1089,7 +1092,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3(data=df1,x1="TNFa.NFkB",x2="APM.TC",draw.th=F,x.th="ERS",split.lm=TRUE)+
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_imm1_vs_imm3_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","meta_imm1_vs_imm3_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -1110,7 +1113,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3(data=df1,x1="IFN.I",x2="APM.TC",draw.th=F,x.th="ERS")+
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_imm2_vs_imm3_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","meta_imm2_vs_imm3_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -1132,7 +1135,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3_th(data=df1,x1="TNFa.NFkB",x2="IFN.I",draw.th=T,x.th="ERS") +
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_imm1_vs_imm2_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","meta_imm1_vs_imm2_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -1203,7 +1206,7 @@ p <- ggplot(df1,aes(x=cat,y=APM.TC)) +
     axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
     legend.position="none")  
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_violin_imm.pdf"),width=5,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","meta_violin_imm.pdf"),width=5,height=7)
 print(p)
 dev.off()
 
@@ -1229,7 +1232,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3(data=df1,x1="ESR1",x2="ERS",draw.th=TRUE,x.th="ESR1",split.lm=TRUE) +
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_esr1_vs_ers_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","meta_esr1_vs_ers_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -1250,7 +1253,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3(data=df1,x1="ERS",x2="TNFa.NFkB",draw.th=TRUE,x.th="ERS",split.lm=TRUE)+
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_ers_vs_imm1_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","meta_ers_vs_imm1_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -1270,7 +1273,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3(data=df1,x1="ERS",x2="IFN.I",draw.th=TRUE,x.th="ERS",split.lm=TRUE)+
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_ers_vs_imm2_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","meta_ers_vs_imm2_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
@@ -1290,7 +1293,7 @@ txt <- rbind(txt1,txt2)
 p <- my_plot_d3(data=df1,x1="ERS",x2="APM.TC",draw.th=TRUE,x.th="ERS",split.lm=TRUE)+
   geom_text(data=txt,aes(x=x,y=y,label=label),size=5,color=1)
 
-pdf(file.path(fig_dir,"6_heatmap_bc_subtypes","activity_plot","meta_ers_vs_imm3_v3.pdf"),width=7,height=7)
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","activity_plot","meta_ers_vs_imm3_v3.pdf"),width=7,height=7)
 print(p)
 dev.off()
 ```
