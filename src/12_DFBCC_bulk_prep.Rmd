@@ -10,7 +10,6 @@ output:
 ## Load library
 ```{r}
 suppressPackageStartupMessages({
-  # library(DESeq2)
   library(dplyr)
   library(tibble)  
   library(org.Hs.eg.db)
@@ -20,7 +19,7 @@ suppressPackageStartupMessages({
 ## Normalized mat
 ```{r}
 data_dir1 <- file.path(data_dir,"dfbcc","bulk_RNAseq")
-obj_dir1 <- file.path(obj_dir,"11_dfbcc_txn")
+obj_dir1 <- file.path(obj_dir,"DFBCC_txn")
 norm.mat <- read.csv(file.path(data_dir1,"normalized_counts_30-522712517.csv"))
 norm.gids <- norm.mat$ID
 ```
@@ -148,10 +147,7 @@ all.syms <- all.syms[-is.dup]
 ## Ensemble gene ids that also have Gene Symbols
 rownames(df.1) <- all.syms
 
-saveRDS(df.1,file.path(obj_dir1,"txn_32_hr_v2.rds"))
-# df <- readRDS(file.path("/Users/kenichishimada/Dropbox (HMS)/_projects_/B06 03 HR-APM/manuscript/Rdata/11_dfci_txn","txn_32_hr.rds"))
-
-
+saveRDS(df.1,file.path(obj_dir1,"dfbcc_bulk_logtxn.rds"))
 ```
 
 

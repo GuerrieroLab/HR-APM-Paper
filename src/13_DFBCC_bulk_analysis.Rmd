@@ -1,0 +1,197 @@
+---
+title: "R Notebook"
+# output: html_notebook
+---
+
+## Initial setup
+
+### Load packages
+```{r}
+suppressPackageStartupMessages({
+  library(org.Hs.eg.db)
+  library(RColorBrewer)
+  library(viridis)
+  library(ggplot2)
+  library(ggrepel)
+  library(GSVA)
+  library(heatmap3)
+  library(dplyr)
+})
+```
+### Set paths
+```{r}
+obj_dir1 <- file.path(obj_dir,"DFBCC_txn")
+fig_dir1 <- file.path(fig_dir,"13_DFBCC_bulk_analysis")
+```
+
+### Load  data
+```{r}
+## transcriptome data
+ldf <- readRDS(file.path(obj_dir1,"dfbcc_bulk_logtxn.rds"))
+ldf <- ldf[names(ldf)!="NormalBreast"]
+tested.gns <- rownames(ldf)
+
+## CCLE
+x <- load(file.path(obj_dir,"CCLE","ccle_module_expression.rda"))
+```
+
+### Load gene signatures 
+```{r}
+mod1 <- readRDS(file=file.path(obj_dir,"Gene_modules","module_genes_final.rds"))#[-2]
+mod.gns <- lapply(mod1,function(x)x[x %in% tested.gns]) # 237
+
+## MSigDB data
+msigdb <- readRDS(file.path(obj_dir,"Pathways","msigdb.rds"))
+prefix <- sub("_.+","",names(msigdb))
+msigdb <- c(msigdb,mod.gns)
+uniq.gns <- unique(unlist(mod.gns))
+```
+
+## Update transcritpome `ldf`
+### Trim duplicated samples - `ldf` to `ldf.2` (all genes) and `ldf.3` (module genes)
+```{r}
+smpls <- names(ldf)
+
+## genes that exist both in the count matrix and in MSigDB
+uniq.egs <- rownames(ldf)
+sum(uniq.gns %in% uniq.egs)# 239
+uniq.gns[!uniq.gns %in% uniq.egs] # CXCL5,FCGR1B,HLA-G,HLA-H,GBP6,XCL1,KLRC3,KLRC1,KIR3DL3,KIR3DL1,CSF2,GZMH,IL12A,FASLG,CCL20  
+
+## updated module genes
+mod.gns.1 <- lapply(mod.gns,function(gns)gns[gns %in% uniq.egs]) 
+used.gns <- unlist(mod.gns.1)
+
+## ldf.2 => summarize BOT5644 and BOT6241
+bot5644 <- rowMeans(ldf[grep("BOT5644",names(ldf))])
+bot6241 <- rowMeans(ldf[grep("BOT6241",names(ldf))])
+
+ldf.2 <- cbind(ldf[!sub("\\.1","",names(ldf)) %in% c("BOT5644","BOT6241")],BOT5644=bot5644,BOT6241=bot6241)
+sorted.smpls <- sort(names(ldf.2))
+ldf.2 <- ldf.2[sorted.smpls] # 
+ldf.3 <- ldf.2[used.gns,]
+
+x <- cor(t(ldf.3),method="pearson")
+```
+## Correlation between genes, mean correlation per module
+
+### Reorder genes within each module
+```{r}
+lst.used.gns.1 <- list()
+for(nm in names(mod.gns.1)){
+  ug <- mod.gns.1[[nm]]
+  x.tmp <- x[ug,ug]
+  h1 <- hclust(as.dist(1 - cor(t(x.tmp), use = "pa")))
+  ug1 <- ug[h1$order]
+  lst.used.gns.1[[nm]] <- ug1
+}
+used.gns.1 <- unlist(lst.used.gns.1)
+x1 <- x[used.gns.1,used.gns.1]
+```
+
+### PCC across individual genes
+
+#### side colors
+
+```{r}
+load(file.path(obj_dir,"misc","tcga_heatmap_sidecols.rda")) # mod.side.cols
+
+mod.side.cols <- mod.side.cols[used.gns,]
+sc <- mod.side.cols[,"immune"]
+sc[sc=="white"] <- "steelblue"
+mod.side.cols[,"immune"] <- sc
+mod.side.cols <- mod.side.cols[,c(1,3)]
+colnames(mod.side.cols) <- c("hallmark","module")
+
+## conserved genes
+lc <- c(brewer.pal(3,"Set1")[2],brewer.pal(3,"Dark2")[1:2])
+cons.gns <- readRDS(file.path(obj_dir,"CCLE","conserved_gns.rds"))[1:3]
+cons.gns <- lapply(cons.gns,function(x)x[x %in% uniq.egs]) # didn't change
+names(lc) <- names(cons.gns)
+
+labs <- rep(names(cons.gns),sapply(cons.gns,length))
+lcol1 <- rep("white",nrow(mod.side.cols))
+names(lcol1) <- rownames(mod.side.cols)
+lcol1[unlist(cons.gns)] <- lc[labs]
+mod.side.cols <- cbind(mod.side.cols,intrinsic=lcol1)
+colnames(mod.side.cols)[2] <- "whole-tumor"
+```
+
+### [Fig 4] heatmap of individual genes and mean correlation per module
+```{r}
+pdf(file.path(fig_dir1,"heatmap_individual_genes.pdf"),width=7,height=7)
+hc.m <- heatmap3(x1,scale="none",#col=cols,
+          ColSideColors=mod.side.cols,
+          balanceColor = TRUE,
+          # Colv=NA,Rowv=NA,
+          main="29 HR+ samples from DFCI (bulk RNA-seq)")
+dev.off()
+
+x2 <- x
+diag(x2) <- NA
+mean.hrs <- sapply(mod.gns.1,function(x){
+  sapply(mod.gns.1,function(y){
+    mean(x2[x,y],na.rm=T)
+  })
+})
+
+cols <- colorRampPalette(c("navy", "white", "firebrick3"))(201)
+names(cols) <- -100:100
+rng <- round(range(mean.hrs)*100,0)
+cols1 <- cols[as.character(seq(rng[1],rng[2]))]
+
+##
+uc <- cbind(subclass=c("steelblue","#7FC97F","#FDC086","#BEAED4"))
+pdf(file.path(fig_dir1,"heatmap_mean_genes.pdf"),width=7,height=7)
+hc.mean.m <- heatmap3(mean.hrs,col=cols1,scale="none",
+                 Colv=NA,Rowv=NA,
+                 ColSideColors=uc,RowSideColors=uc,
+                 balanceColor = FALSE,          
+                 main="29 in-house HR+ samples (mean)")
+dev.off()
+write.csv(mean.hrs,file.path(fig_dir1,"heatmap_mean_genes.csv"))
+```
+
+## Compute GSVA scores of modules
+```{r}
+gs <- tail(msigdb,4)
+
+# Prepare the ssGSEA parameters using ssgseaParam
+ssgsea_params <- ssgseaParam(expr = as.matrix(ldf.2), 
+                             geneSets = mod.gns.1, 
+                             minSize = 10, 
+                             maxSize = 500)
+
+# Run GSVA using the 'ssgsea' method
+gsva.gs <- gsva(ssgsea_params)
+
+df.gs <- as.data.frame(t(gsva.gs)) %>% 
+  tibble::rownames_to_column("bot") %>%
+  arrange(desc(ERS)) %>%
+  mutate(new=paste0("df",seq(ncol(gsva.gs))))
+```
+
+### [Fig 4B] heatmap - GSVA activity of signature
+```{r}
+act1 <- df.gs[2:5]
+rownames(act1) <- df.gs$new
+uc <- as.vector(uc)
+names(uc) <- names(act1) <- c("ERS","TNFa/NFkB","IFN-I","APM/TC") 
+
+pdf(file.path(fig_dir1,"module_activity_dfci_bulk.pdf"),width= 7,height=7)
+heatmap3(act1,col=viridis(200),
+         scale="column",Rowv=NA,Colv=NA,
+         cexRow=.8,margin=c(10,12),
+         ColSideColors = uc,
+         main="Module expression\nper patient\n(bulk RNA-seq)")
+dev.off()
+```
+
+
+## Save data
+
+```{r}
+saveRDS(df.gs,file.path(obj_dir1,"dfbcc_bulk_mod_activity.rds"))
+```
+
+
+
