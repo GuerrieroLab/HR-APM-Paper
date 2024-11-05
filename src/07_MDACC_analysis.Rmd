@@ -11,25 +11,29 @@ suppressPackageStartupMessages({
   library(tidyr)
   library(ggplot2)
   library(heatmap3)
+  library(ROCR)
+  library(RColorBrewer)
 })
+source(file.path(src_dir,"utils","plot_module_scores.R"))
+
 ```
 
 ### Load Data
 ```{r}
-mdacc_metadata <- read.csv(file.path(data_dir, "clinical", "mdacc", "MDACC 74 tumors description.csv")) %>%
-  mutate(Subtype.classification = factor(c("HR+", "DP", "TNBC", "HER2+")[((HR.status == "negative") * 2 + (HER2.status == "positive") + 1)], 
+mdacc_metadata <- read.csv(file.path(data_dir, "MDACC", "MDACC 74 tumors description.csv")) %>%
+  mutate(Subtype.classification = 
+           factor(c("HR+/HER2-", "HR+/HER2+", "HR-/HER2-", "HR-/HER2+")[((HR.status == "negative") * 2 + (HER2.status == "positive") + 1)], 
                                          levels = c("HR+/HER2-", "HR+/HER2+", "HR-/HER2-", "HR-/HER2+")))
 names(mdacc_metadata)[1] <- "sample_name"
 
-mdacc_data <- read.csv(file.path(data_dir, "clinical", "mdacc", "MDACC 74 tumors log2 tpm RNA-seq data.csv"))
+mdacc_data <- read.csv(file.path(data_dir, "MDACC", "MDACC 74 tumors log2 tpm RNA-seq data.csv"))
 names(mdacc_data)[1] <- "hgnc_symbol"
 
-sigs <- readRDS(file = file.path(obj_dir, "1-4_prep", "module_genes_final_122923.rds"))
+sigs <- readRDS(file = file.path(obj_dir, "Gene_modules", "module_genes_final.rds"))
 comm.gns <- unlist(sigs)
 comm.ers <- sigs$ERS
-comm.apm.tc <- unlist(sigs[-1])
 
-load(file = file.path(obj_dir, "1-4_prep", "heatmap_sidecols.rda")) # lcols, slcols
+load(file = file.path(obj_dir, "misc", "heatmap_sidecols.rda")) # lcols, slcols
 
 lcols1 <- lcols[comm.gns, ]
 hallmarks <- c("ESR1", "CD8A", "HLA-A")
@@ -69,7 +73,7 @@ cols <- colorRampPalette(c("navy", "white", "firebrick3"))(201)
 
 ##
 for(cl in smpl.class){
-  pdf(file.path(fig_dir,"7_mdacc_subtypes",paste0("mdacc_",cl,"_v4.pdf")),
+  pdf(file.path(fig_dir,"07_MDACC_analysis",paste0("mdacc_",cl,"_v4.pdf")),
       width=7,height=7)	
 	par(cex.main=3)
 
@@ -101,7 +105,7 @@ mean.mdacc.pe <- lapply(mdacc.pe, function(pe) {
 
 # Save heatmaps and csv files
 for (cl in smpl.class){
-  pdf(file.path(fig_dir, "7_mdacc_subtypes", paste0("mean_mdacc_", cl, "_v4.pdf")), width = 7, height = 7)
+  pdf(file.path(fig_dir, "07_MDACC_analysis", paste0("mean_mdacc_", cl, "_v4.pdf")), width = 7, height = 7)
   
   cols1 <- cols[(-100:100) %in% seq(-round(max(abs(mean.mdacc.pe[[cl]]) * 100)), round(max(abs(mean.mdacc.pe[[cl]]) * 100)))]
   heatmap3(mean.mdacc.pe[[cl]], Rowv = NA, Colv = NA, col = cols1, scale = "none", balanceColor = TRUE,
@@ -109,7 +113,7 @@ for (cl in smpl.class){
            main = paste0(ttls[cl], " (MDACC, mean)"))
   
   dev.off()
-  write.csv(mean.mdacc.pe[[cl]], file.path(fig_dir, "7_mdacc_subtypes", paste0("mean_mdacc_", cl, "_v4.csv")))
+  write.csv(mean.mdacc.pe[[cl]], file.path(fig_dir, "07_MDACC_analysis", paste0("mean_mdacc_", cl, "_v4.csv")))
 }
 ```
 
@@ -119,14 +123,16 @@ esr1.mdacc <- mdacc_data %>%
   filter(hgnc_symbol == "ESR1") %>%
   gather(sample_name, esr1, -hgnc_symbol) %>%
   inner_join(mdacc_metadata, by = "sample_name") %>%
-  select(sample_name, esr1, Subtype.classification, HR.status)
+  select(sample_name, esr1, Subtype.classification, HR.status) %>%
+  mutate(is.hr = factor(Subtype.classification %in% c("HR+/HER2-", "HR+/HER2+"),levels=c(TRUE,FALSE))) %>%
+  mutate(esr1 = as.numeric(esr1))
+esr1.mdacc <- esr1.mdacc %>%
+  dplyr::rename("ESR1"="esr1") %>%
+  dplyr::rename("mod"="Subtype.classification")
 
-esr1.mdacc$esr1 <- as.numeric(esr1.mdacc$esr1)
-
-p <- ggplot(esr1.mdacc, aes(Subtype.classification, esr1)) +
-  geom_violin(fill = 'grey80') +
-  geom_jitter(height = 0, width = 0.2, size = 0.5) +
-  labs(title = "MDACC", x = "", y = "ESR1 expression (log2(TPM+1)")
-
-p
+source(file.path(src_dir,"utils","plot_module_scores.R"))
+p <- my_plot_d1(data=esr1.mdacc,x1="ESR1") + ggtitle("ESR1 gene (MDACC)") + ylab("Expression (log2(TPM+1)")
+pdf(file.path(fig_dir,"07_MDACC_analysis","mdacc_violin_esr1.pdf"),width=4,height=8)
+print(p)
+dev.off()
 ```
