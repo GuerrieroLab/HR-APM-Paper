@@ -1,0 +1,302 @@
+---
+title: "Single-cell RNA-seq - Clustering for myeloid cells"
+---
+
+This method utilizes aggregate-based normalization of data.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Initial setup
+### Load libraries
+```{r message=FALSE}
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(Seurat)
+  library(tidyverse)
+})
+```
+### Update paths
+```{r}
+obj_dir1 <- file.path(obj_dir,"WEHI")
+fig_dir1 <- file.path(fig_dir,"08_WEHI_prep")
+```
+
+### Load input data
+```{r}
+## Save Seurat Objects
+```{r}
+seurat_wp <- readRDS(file.path(obj_dir1, "wehi_seurat_all_cells.rds"))  # whole population
+seurat_lym <- readRDS(file.path(obj_dir1, "wehi_seurat_lymphoid.rds")) # lymphocytes
+seurat_mye <- readRDS(file.path(obj_dir1, "wehi_seurat_mye.rds")) # myeloid cells
+```
+
+### Define markers for cell lineages
+```{r}
+# Define gene lists
+all_gns <- rownames(GetAssayData(seurat_wp))
+
+epi_gns <- c("KRT7", "KRT8", "KRT18", "KRT19", "KRT5", "KRT6B", "KRT14", "KRT17")
+fib_gns <- c("COL1A1", "ACTA2", "PDPN")
+peri_gns <- c("RGS5")
+endo_gns <- c("PECAM1")
+mast_gns <- c("MS4A2", "KIT")
+dc_gns <- c("FCER1A", "CD1A", "IRF4", "IRF8", "IL3RA", "LAMP3")
+mac_gns <- c("CD68", "CD163", "CD14", "LYZ", "FCGR3A")
+t_gns <- c("CD3D", "CD2", "TRAC", "TRBC1", "TRDC", "CD4", "FOXP3", "CD8A", "GZMB", "GZMK")
+nk_gns <- c("KLRD1", "KLRC1")
+b_gns <- c("MS4A1", "IGHM", "JCHAIN")
+pl_gns <- c("IGHA1", "IGHA2", "IGHG1", "IGHG3", "IGHG4")
+
+# Create feature plots for markers of interest
+lst.mks <- list(epi = epi_gns,
+                fib = fib_gns,
+                peri = peri_gns,
+                endo = endo_gns,
+                mac = mac_gns,
+                dc = dc_gns,
+                mast = mast_gns,
+                t = t_gns,
+                nk = nk_gns,
+                b = b_gns,
+                pl = pl_gns)
+
+names(lst.mks) <- c("Cancer","Fibro","Peri","Endo","Mono/Mac","DC","Mast","T","NK","B","Plasma")
+
+mks <- unlist(lst.mks)
+mye.mks <- unlist(lst.mks[5:7])
+lym.mks <- unlist(lst.mks[8:11])
+
+table(mks %in% all_gns) ## 46 genes are all TRUE
+
+```
+
+### Define breast cancer subtypes
+
+```{r}
+sts <- unique(seurat_wp@meta.data[c("orig.ident", "subtype")])
+subtypes <- sts$orig.ident
+names(subtypes) <- sts$subtype
+```
+
+## Feature plot for marker genes
+### [Fig 2A-left] celltype on UMAP
+
+```{r}
+png(file.path(fig_dir1, "umap_wp_celltype.png"), width = 700,height = 700)
+p <- DimPlot(seurat_wp, group.by = "celltype_2", label = FALSE, reduction = "umap", raster=FALSE, pt.size=0.1) +
+  theme(legend.text = element_text(size = 24),
+        legend.key.size=unit(5,"mm")) +
+  labs(title = NULL)
+print(p)
+dev.off()
+```
+### [Fig 2A-left] subtype on UMAP
+
+```{r}
+seurat_wp@meta.data$subtype <- factor(seurat_wp@meta.data$subtype,levels=c("HR","HER2","TNBC"),labels=c("HR+","HER2+","TNBC"))
+# wp@meta.data$subtype <- factor(wp@meta.data$subtype,levels=c("HR","HER2","TNBC"),labels=c("HR+","HER2+","TNBC"))
+
+png(file.path(fig_dir1, "umap_wp_subtype.png"), width = 700,height = 700)
+p <- DimPlot(seurat_wp, group.by = "subtype", label = FALSE, reduction = "umap", raster=FALSE, pt.size=0.05) +
+  theme(legend.text = element_text(size = 24),
+        legend.key.size=unit(5,"mm")) +
+  labs(title = NULL)
+print(p)
+dev.off()
+```
+
+### [Fig 2A-left] subtype on UMAP
+
+```{r}
+seurat_wp@meta.data$orig.ident <- factor(seurat_wp@meta.data$orig.ident,labels=paste0(1:34))
+
+png(file.path(fig_dir1, "umap_wp_samples.png"), width = 700,height = 700)
+p <- DimPlot(seurat_wp, group.by = "orig.ident", label = FALSE, reduction = "umap", raster=FALSE, pt.size=0.05) +
+  theme(legend.text = element_text(size = 16),
+        legend.key.size=unit(5,"mm")) +
+  labs(title = NULL)
+print(p)
+dev.off()
+```
+
+### [Fig S4A-right] basal activity on UMAP
+```{r}
+p <- FeaturePlot(seurat_wp, feature = "basal", label=FALSE, reduction = "umap",raster=FALSE, pt.size=0.1) +
+  scale_color_gradient(low = "blue", high = "red", na.value = "grey") +
+  theme(legend.text = element_text(size = 24),
+        legend.key.size=unit(10,"mm")) +
+  labs(title = NULL)
+png(file.path(fig_dir1,"umap_wp_basal_activity.png"),width=700,height=700)
+print(p)
+dev.off()
+```
+
+### [Fig S4A-right] luminal vs basal score (not)
+```{r}
+me1 <- as.data.frame(mean.exp1[,1:2]) %>%
+  tibble::rownames_to_column("cluster") %>%
+  filter(grepl("^epi",cluster)) %>%
+  mutate(cluster=sub("epi_","",cluster))
+
+p <- ggplot(me1,aes(x=`luminal-krt`,y=`basal-krt`,label=cluster)) +
+  geom_point(aes(color=`basal-krt`)) +
+  ggrepel::geom_text_repel() +
+  ggtitle("luminal and basal keratin expression per cluster") + 
+  scale_color_gradient(low = "blue", high = "red", na.value = "grey") +
+  theme_bw()
+
+pdf(file.path(fig_dir1,"cancer_cell_keratin_exp.pdf"),width=5,height=5)
+print(p)
+dev.off()
+```
+
+### [Fig S4B] gene marker plots - whole population
+```{r}
+# Loop through markers and generate plots
+mks1 <- paste0(unlist(lst.mks)," (",rep(names(lst.mks),sapply(lst.mks,length)),")")
+i.wp <- c("KRT8","KRT17","COL1A1","RGS5","PECAM1","CD68","MS4A2","IGHG1","IGHA1","CD3D","KLRC1","MS4A1","IRF4","IRF8")
+mk.wp <- mks1[sapply(i.wp,function(gn)grep(paste0("^",gn),mks1))]
+mk.wp[1:2] <- c("KRT8 (Cancer, luminal)","KRT17 (Cancer, basal)")
+names(mk.wp) <- i.wp
+
+for (mk in i.wp) {
+  p <- FeaturePlot(seurat_wp, feature = mk, label = FALSE, reduction = "umap", raster=FALSE, pt.size=0.1) +
+    theme(
+      plot.title=element_text(size=40),
+      legend.text = element_text(size = 16),
+      legend.key.size=unit(5,"mm")) +
+    labs(title = mk.wp[mk])
+  png(file.path(fig_dir1, "exp_wp", paste0("umap_wp_", mk, ".png")), width = 700,height = 700)
+  print(p)
+  dev.off()
+}
+```
+
+### [Fig S4C] gene marker plots - lymphocytes
+```{r}
+i.lym <- c("MS4A1","IGHM","IGHA1","IGHG1","CD3D","CD4","FOXP3","CD8A","KLRC1","GZMB","GZMK")
+mk.lym <- mks1[sapply(i.lym,function(gn)grep(paste0("^",gn),mks1))]
+names(mk.lym) <- i.lym
+
+for(mk in i.lym){
+  p <- FeaturePlot(seurat_lym, feature = mk, label = FALSE, reduction = "umap", raster=FALSE, pt.size=0.1) +
+    theme(
+      plot.title=element_text(size=40),
+      legend.text = element_text(size = 16),
+      legend.key.size=unit(5,"mm")) +
+    labs(title = mk.lym[mk])
+  png(file.path(fig_dir1,"exp_lym",paste0("umap_lym_",mk,".png")),width=700,height=700)
+  print(p)
+  dev.off()
+}
+```
+
+### [Fig S4D] gene marker plots - myeloid cells
+```{r}
+i.mye <- c("MS4A2","IRF4","CD14","CD68","CD163")
+mk.mye <- mks1[sapply(i.mye,function(gn)grep(paste0("^",gn),mks1))]
+names(mk.mye) <- i.mye
+
+for(mk in i.mye){
+  p <- FeaturePlot(seurat_mye, feature = mk, label = FALSE, reduction = "umap", raster=FALSE, pt.size=0.1) +
+    theme(
+      plot.title=element_text(size=40),
+      legend.text = element_text(size = 16),
+      legend.key.size=unit(5,"mm")) +
+    labs(title = mk.mye[mk])  
+  png(file.path(fig_dir1,"exp_mye",paste0("umap_mye_",mk,".png")),width=700,height=700)
+  print(p)
+  dev.off()
+}
+```
+
+### [Fig 2B] Dotplot - summary of marker expression per cell type
+```{r}
+pdf(file.path(fig_dir1,"dotplot_wp_celltype.pdf"),width=12,height=6)
+DotPlot(seurat_wp, features = unique(mks), group.by = "celltype_1") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  xlab("") + ylab("")
+dev.off()
+```
+
+## Myeloid UMAP plot
+
+### [Fig S4D]  myeloid cell types
+```{r}
+p <- DimPlot(seurat_mye, group.by = "celltype_v3", label=FALSE, 
+             reduction = "umap", raster=FALSE, pt.size=0.1) +
+    theme(legend.text = element_text(size = 24), legend.key.size=unit(5,"mm")) +
+    labs(title = NULL)
+
+png(file.path(fig_dir1,"umap_myeloid_celltype_v3.png"),width=700,height=700)
+p <- DimPlot(seurat_mye, group.by = "celltype_v3", label=FALSE, 
+             reduction = "umap", raster=FALSE, pt.size=0.1) +
+    theme(legend.text = element_text(size = 24), legend.key.size=unit(5,"mm")) +
+    labs(title = NULL)
+print(p)
+dev.off()
+```
+
+### [Fig S4D] BC subtypes
+```{r}
+seurat_mye@meta.data$subtype <- factor(seurat_mye@meta.data$subtype,levels=c("HR","HER2","TNBC"),labels=c("HR+","HER2+","TNBC"))
+
+p <- DimPlot(seurat_mye, group.by = "subtype", label=FALSE, 
+             reduction = "umap",raster=FALSE, pt.size=0.1) +
+  theme(legend.text = element_text(size = 24),
+        legend.key.size=unit(5,"mm")) +
+  labs(title = NULL)
+png(file.path(fig_dir1,"umap_myeloid_subtype.png"),width=700,height=700)
+print(p)
+dev.off()
+```
+
+### [Fig S4D] Patients
+```{r}
+png(file.path(fig_dir1,"umap_myeloid_sample.png"),width=700,height=700)
+p <- DimPlot(seurat_mye, group.by = "orig.ident", label=FALSE, 
+             reduction = "umap",raster=FALSE, pt.size=0.1) +
+  labs(title = NULL) +
+  NoLegend()
+print(p)
+dev.off()
+```
+
+## Lymphoid UMAP plots
+
+### [Fig S4C] Lymphocyt subtypes
+```{r}
+png(file.path(fig_dir1, "umap_lymphoid_celltype_v3.png"), width = 700,height = 700)
+p <- DimPlot(seurat_lym, group.by = "celltype_v3", label = FALSE, reduction = "umap",raster=FALSE, pt.size=0.1) +
+  theme(legend.text = element_text(size = 24),
+        legend.key.size=unit(5,"mm")) +
+  labs(title = NULL)
+print(p)
+dev.off()
+```
+
+### [Fig S4C] BC subtypes
+```{r}
+seurat_lym@meta.data$subtype <- factor(seurat_lym@meta.data$subtype,levels=c("HR","HER2","TNBC"),labels=c("HR+","HER2+","TNBC"))
+
+png(file.path(fig_dir1, "umap_lymphoid_subtype_v3.png"), width = 700,height = 700)
+p <- DimPlot(seurat_lym, group.by = "subtype", label = FALSE, reduction = "umap", raster=FALSE, pt.size=0.1) +
+  theme(legend.text = element_text(size = 24),
+        legend.key.size=unit(5,"mm")) +
+  labs(title = NULL)
+print(p)
+dev.off()
+```
+
+### [Fig S4C] Patients
+```{r}
+png(file.path(fig_dir1, "umap_lymphoid_sample_v3.png"), width = 700,height = 700)
+p <- DimPlot(seurat_lym, group.by = "orig.ident", label = FALSE, reduction = "umap",raster=FALSE, pt.size=0.1) +
+  theme(legend.text = element_text(size = 24),
+        legend.key.size=unit(5,"mm")) +
+  labs(title = NULL) + NoLegend()
+print(p)
+dev.off()
+```
