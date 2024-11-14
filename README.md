@@ -1,8 +1,7 @@
 ## Relationship between estrogen receptor signaling and immune evasion
 
-This repository contains codes used for a manuscript, 
-"An estrogen receptor signaling transcriptional program linked to immune evasion in human hormone receptor-positive breast cancer"
- (Shimada, *et al.*).
+This repository contains codes used for a manuscript, Shimada *et al.*, **"An estrogen receptor signaling transcriptional program linked to immune evasion in human hormone receptor-positive breast cancer"**
+
 
 Note:
 Certain paths were set in `.Rprofile` file, which is not shared in this repository. 
