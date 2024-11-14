@@ -328,7 +328,8 @@ for(i in 1:3){
   lcol[tmp.gns] <- int.lc[nm]
 }
 
-rc2.sub <- cbind(rc1.sub,conserved=lcol)
+rc2.sub <- cbind(rc1.sub,conserved=lcol)[,-1]
+colnames(rc2.sub)[2] <- "intrinsic"
 
 pdf(file=file.path(fig_dir1,"heatmap_ccle_cormat_all.pdf"),height=7,width=7)
 hc.all <- heatmap3(ccle.cors.all,distfun=dist,
@@ -350,13 +351,13 @@ write.csv(round(mean.c.hr,3),file.path(fig_dir1,"heatmap_mean_ccle_cormat_hr.csv
 pdf(file=file.path(fig_dir1,"heatmap_mean_ccle_cormat_all.pdf"),height=7,width=7)
 h3(mean.c.all,Colv=NA,Rowv=NA,scale="none",#balanceColor=TRUE,
    margins=c(7,7),main="ALL",col=col.all,
-   ColSideColors=cbind(conserved=int.lc[1:3]),RowSideColors=cbind(conserved=int.lc[1:3]))
+   ColSideColors=cbind(intrinsic=int.lc[1:3]),RowSideColors=cbind(conserved=int.lc[1:3]))
 dev.off()
 
 pdf(file=file.path(fig_dir1,"heatmap_mean_ccle_cormat_hr.pdf"),height=7,width=7)
 h3(mean.c.hr,Colv=NA,Rowv=NA,scale="none",#balanceColor=TRUE,
    margins=c(7,7),main="HR+", col=col.hr,
-   ColSideColors=cbind(conserved=int.lc[1:3]),RowSideColors=cbind(conserved=int.lc[1:3]))
+   ColSideColors=cbind(intrinsic=int.lc[1:3]),RowSideColors=cbind(conserved=int.lc[1:3]))
 dev.off()
 ```
 
@@ -382,14 +383,14 @@ norm.ccle.exp.graph <- t(apply(ccle.exp.graph,1,function(x){
 #Plot heatmap for CCLE PAM50
 ri <- rev(unlist(cons.gns[1:3]))
 
-pdf(file=file.path(fig_dir1,"ccle_heatmap_all.pdf"),width=7,height=7)
+pdf(file=file.path(fig_dir1,"ccle_heatmap_all.pdf"),width=7,height=10)
 heatmap_ccle<- heatmap3(norm.ccle.exp.graph[ri,],
           col=cols,scale="none",
           Rowv=NA,Colv=NA,
           balanceColor=TRUE,
           cexRow=0.5,
-          RowSideColors=rc2.sub[ri,c(1,3,2)],
-          ColSideColors= bc.sub)
+          RowSideColors=rc2.sub[ri,],
+          ColSideColors= cbind(PAM50=bc.sub))
 par(xpd=T)
 legend(0.7,1.1,c("Luminal A","Luminal B","Her2amp","Basal-like"),
        fill =c("purple","green","hotpink","navyblue"),border=NA, box.lwd = NA) 
@@ -423,19 +424,17 @@ norm.ccle.exp.graph <- t(apply(ccle.exp.graph[,is.used],1,function(x){
 ri <- rev(unlist(cons.gns[1:3]))
 
 o <- order(colMeans(norm.ccle.exp.graph[cons.gns[[1]],]),decreasing=T)
-pdf(file=file.path(fig_dir1,"ccle_heatmap_luminal.pdf"),width=7,height=7)
+pdf(file=file.path(fig_dir1,"ccle_heatmap_luminal.pdf"),width=7,height=10)
 heatmap_ccle<- heatmap3(norm.ccle.exp.graph[ri,o],
           col=cols,scale="none",
           Rowv=NA,Colv=NA,
           balanceColor=TRUE,
           cexRow=0.5,
-          RowSideColors=rc2.sub[ri,c(1,3,2)],
-          ColSideColors= bc.sub[o])
+          RowSideColors=rc2.sub[ri,],
+          ColSideColors= cbind(PAM50=bc.sub[o]))
 par(xpd=T)
 legend(0.7,1.1,c("Luminal A","Luminal B"),
        fill =brewer.pal(3,"Pastel1")[1:2],border=NA, box.lwd = NA)
-# legend(-.15,.3,c("ERS","IFN int","APM/TC"),
-#       fill=c("blue","red","pink"),border=NA, box.lwd = NA)
 par(xpd=F)
 dev.off()
 
@@ -479,7 +478,7 @@ msigdb.1 <- lapply(msigdb,function(x){
 }) # 16437
 
 ge10 <- sapply(msigdb.1,length)>=10 & sapply(msigdb.1,length) <= 500
-msigdb.2 <- msigdb.1[ge10] # 11375
+msigdb.2 <- msigdb.1[ge10] # 8077
 
 all.genes <- intersect(unique(unlist(msigdb.2)),tested.ccle.gns) # 13196
 ```

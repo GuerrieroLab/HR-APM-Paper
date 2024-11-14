@@ -12,12 +12,13 @@ suppressPackageStartupMessages({
   library(ggplot2)
   library(heatmap3)
   library(GSVA)
-  library(dplyr)
   library(tidyr)
   library(ROCR)
   library(MASS)
+  library(dplyr)
 })
 source(file.path(src_dir,"utils","plot_module_scores.R"))
+source(file.path(src_dir,"utils","subtype_violin_plot.R"))
 ```
 
 
@@ -318,7 +319,7 @@ dfx1 <- dfx.tcga %>% select(-2) %>% unique()
 #### [Fig S1G-I] Violin plot
 
 ```{r}
-p <- subtype_activity_plot_within(dfx=dfx.tcga,mod="ERS") + ggtitle("ERS (TCGA)")
+p <- subtype_violin_within(dfx=dfx.tcga,mod="ERS") + ggtitle("ERS (TCGA)")
 pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","tcga_ers_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
@@ -346,8 +347,8 @@ dev.off()
 
 
 ```{r}
-p <- subtype_violin_between(dfx=dfx.tcga,mod="TNFA.NFKB") + ggtitle("ERS vs Pan-immune (TCGA)")
-pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","tcga_ers_imm1_v2.pdf"),width=3,height=6)
+p <- subtype_violin_between(dfx=dfx.tcga,mod="IMMUNE") + ggtitle("ERS vs Pan-immune (TCGA)")
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","tcga_ers_imm_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 
@@ -526,8 +527,8 @@ dev.off()
 
 
 ```{r}
-p <- subtype_violin_between(dfx=dfx.meta,mod="TNFA.NFKB") + ggtitle("ERS vs Pan-immune (METABRIC)")
-pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","meta_ers_imm1_v2.pdf"),width=3,height=6)
+p <- subtype_violin_between(dfx=dfx.meta,mod="IMMUNE") + ggtitle("ERS vs Pan-immune (METABRIC)")
+pdf(file.path(fig_dir,"06_TCGA_METABRIC_subtypes","violin","meta_ers_imm_v2.pdf"),width=3,height=6)
 print(p)
 dev.off()
 

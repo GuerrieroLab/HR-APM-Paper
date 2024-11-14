@@ -56,7 +56,7 @@ rownames(df.gs) <- names(cs1)
 
 ### Load more objects
 ```{r}
-df.cn.t <- readRDS(file.path(obj_dir1,"cn","CN_anlaysis_data.rds")) %>%
+df.cn.t <- readRDS(file.path(obj_dir1,"cn","CN_analysis_data.rds")) %>%
   mutate(n.t.48 = as.integer((CD4T_Treg + CD4T_nonTreg + CD8T) * n)) %>% # CD4T_nonTreg and CD8T
   mutate(n.t.all = as.integer((CD4T_Treg + CD4T_nonTreg+ CD8T + T_other) * n)) # all T
 
@@ -122,7 +122,6 @@ df.cn.ts$n.t.all[df.cn.ts$n.t.all > idx] <- idx +1
 
 ```{r}
 cor1 <- cor(df.cn.ts$HLAABC,df.cn.ts$HLADPB1,method="spearman",use="pairwise.complete.obs")
-# lm1 <- lm(HLADPB1 ~ HLAABC, data=df.cn.ts)
 
 ### HLAABC vs HLADPB1
 pdf(file.path(fig_dir1,"cn_exp","scatterplot_HLAABC_HLADPB1.pdf"),width=7,height=7)
@@ -321,7 +320,7 @@ colsides2 <- as.matrix(scol1[as.character(norm.cor)])
 colnames(colsides2) <- "Cor.ERS"
 colsides.all <- cbind(colsides,colsides2) # sorted by cor.pe
 
-rowside <- cbind(`TIL-associated`=c("grey80","black")[(colnames(df.cn4) %in% c("CD8T","CD4T_nonCD4T_Treg","CD4T_Treg","Mac_CD163","Mac_CD68_CD163"))+1])
+rowside <- cbind(`TIL-associated`=c("grey80","black")[(colnames(df.cn4) %in% c("CD8T","CD4T_nonTreg","CD4T_Treg","Mac_CD163","Mac_CD68_CD163"))+1])
 names(rowside) <- colnames(df.cn4)
 
 ncl <- sum(cor.sp > 0)
@@ -332,7 +331,7 @@ pdf(file.path(fig_dir1,"cn","heatmap3_ctfreq.pdf"),width=7,height=7)
 hm <- heatmap3(t(df.cn4),
          scale="none",balanceColor=F,Colv=NA,#Rowv=NA,
          col=uniq.cols,
-         RowSideColors = rowside,
+         # RowSideColors = rowside,
          ColSideColors = colsides.all,
          margins=c(5,10),
          main=paste0("0 is btwn ",ncl,"-",ncl+1))
@@ -398,7 +397,7 @@ for(ab in used.abs){
 
 #### [Fig 6C -> S10C] correlation between mean expression per cell type across sample
 ```{r}
-lst.mats <- lapply(used.abs,function(ab){
+lst.mats <- lapply(used.abs[1:3],function(ab){
   mat <- mats[[ab]]
   cts1 <- lst.cst.def[[ab]]
   mat1 <- mat[cts1,,drop=F]
@@ -407,11 +406,11 @@ lst.mats <- lapply(used.abs,function(ab){
 })
 
 mats1 <- t(do.call(rbind,lst.mats))
-sp.smpl <- cor(mats1,method="sp",use="pairwise.complete.obs")
+pe.smpl <- cor(mats1,method="pe",use="pairwise.complete.obs")
 
-cscs <- rep(csc,sapply(lst.cst.def,length))
-pdf(file.path(fig_dir1,"exp_per_smpl","cor_sp_mean_exp_smpl.pdf"),width=7,height=7)
-h3(sp.smpl,scale="none",main="SCC",balanceColor=TRUE,margins=c(10,10),
+cscs <- rep(csc[1:3],sapply(lst.cst.def[1:3],length))
+pdf(file.path(fig_dir1,"exp_per_smpl","cor_pe_mean_exp_smpl.pdf"),width=7,height=7)
+h3(pe.smpl,scale="none",main="PCC",balanceColor=TRUE,margins=c(10,10),
    RowSideColors=cscs,ColSideColors=cscs)
 dev.off()
 ```
@@ -552,7 +551,7 @@ p.er1 <- ggplot(m.era,aes(x=d1,y=expression,color=nT)) +
   geom_vline(xintercept=0,col=1) +
   geom_line() +
   scale_color_manual(values=cols,name="m.era") +
-  geom_line(data=df.cn3.seg,aes(x=x1,y=y1,group=i),color=1,size=2) + 
+  geom_line(data=df.cn3.seg,aes(x=x1,y=y1,group=i),color=1,linewidth=2) + 
   theme_minimal() +
   ggtitle("ERa expression along tumor-stromal axis") +
   xlab("Distance from tumor border  (µm)") +
@@ -740,7 +739,7 @@ p.dpb1 <- ggplot(m.hla2,aes(x=d1,y=expression,color=nT)) +
   xlab("Distance from tumor border  (µm)") +
   ylab("mean HLADPB1 expression per CN")
 
-pdf(file.path(fig_dir1,"cn_exp","HLADPB1 expression per distance.pdf"),width=5,height=5)
+pdf(file.path(fig_dir1,"exp_ts_axis","HLADPB1 expression per distance.pdf"),width=5,height=5)
 print(p.dpb1)
 dev.off()
 ```
@@ -791,7 +790,7 @@ p.hla2 <- ggplot(e300,aes(x=nT,y=expression)) +
   ylab("HLADPB1 Expression") + 
   theme(legend.position="none")
 
-pdf(file.path(fig_dir1,"cn_exp","HLADPB1 vs nT.pdf"),width=5,height=5)
+pdf(file.path(fig_dir1,"exp_ts_axis","HLADPB1 vs nT.pdf"),width=5,height=5)
 print(p.hla2)
 dev.off()
 ```
@@ -826,7 +825,18 @@ dt <- rbindlist(dts) %>%
 #### ER-dependence of HLAABC (hard-coding)
 
 ```{r}
-cts2 <- rep(c("ER_dep","ER_indep","ER_dep"),c(1,6,5))
+er.dep <- c(paste0("HLAABC_",c("Cancer","Endo","Mac_CD68","Mac_CD163","Mac_CD68_CD163","NK","B")),
+  paste0("HLADPB1_",c("Mac_CD68","Mac_CD163","Mac_CD68_CD163")))
+
+tpos <- c("CD8T","CD4T_nonTreg","CD4T_Treg","Mac_CD163","Mac_CD68_CD163")
+mac.subs <- c("Mac_CD68","Mac_CD163","Mac_CD68_CD163")
+
+abc <- paste0("HLAABC_",mac.subs)
+dpb1 <- paste0("HLADPB1_",mac.subs) 
+```
+
+```{r}
+cts2 <- c("ER_indep","ER_dep")[(used.cts %in% sub("HLAABC_","",grep("HLAABC",er.dep,value=T)))+1]
 names(cts2) <- used.cts
 ```
 
@@ -860,7 +870,7 @@ df.cn.hla1 <- dt %>%  ## only within is_ge10
 rng1 <- range(c(df.cn.hla1$expression,9.8),na.rm=T)
 df.cn.hla1.dep <- df.cn.hla1 %>% 
   filter(cell_types_2 == "ER_dep") %>%
-  mutate(cell_types = factor(cell_types,levels=c("Cancer","B","NK","Mac_CD68","Mac_CD163","Mac_CD68_CD163"))) 
+  mutate(cell_types = factor(cell_types,levels=c("Cancer","Endo","B","NK","Mac_CD68","Mac_CD163","Mac_CD68_CD163"))) 
   
 df.cn1.seg <- data.frame(i=factor(c(1,1,2,2)),
                       x1=c(-300,-150, 150,300),
@@ -885,7 +895,7 @@ dev.off()
 ```{r}
 df.cn.hla1.ind <- df.cn.hla1 %>% 
   filter(cell_types_2 == "ER_indep") %>%
-  mutate(cell_types = factor(cell_types,levels=c("Endo","Fibro","CD8T","CD4T_nonTreg","CD4T_Treg","T_other")))
+  mutate(cell_types = factor(cell_types,levels=c("Fibro","CD8T","CD4T_nonTreg","CD4T_Treg","T_other")))
 
 p.hla1.indep <- ggplot(df.cn.hla1.ind,aes(x=d1,y=expression,color=cell_types)) +
   geom_vline(xintercept=0,col=1) +
@@ -984,8 +994,13 @@ names(d.exp2) <- ext.exp$cell_types
 d.exp2 <- d.exp2[order(d.exp2,decreasing=T)]
 
 ##
-cols12 <- rep(c("grey80","brown","grey80"),c(8,1,6))
+uniq.cols12 <- c("brown","grey80")
+names(uniq.cols12) <- c("ER_dep","ER_indep")
+cols12 <- uniq.cols12[cts2]
+names(cols12) <- names(cts2)
+
 d.exp12 <- c(d.exp2,d.exp1)
+cols12.cts <- cols12[names(d.exp12)]
 names(d.exp12) <- paste0(rep(c("dpb1","abc"),c(3,12)),"_",names(d.exp12))
 
 ##
@@ -994,7 +1009,8 @@ par(mar=c(12,5,4,1))
 barplot(d.exp12,las=2,
         main="dHLA expression (stroma - tumor core)",
         ylab="dHLA expression (% of stroma)",
-        col=cols12)
+        col=cols12.cts)
+legend("topright",fill=uniq.cols12,legend=names(uniq.cols12))
 dev.off()
 ```
 
@@ -1032,6 +1048,8 @@ if(0){
 #### `coefs2`
 
 ```{r}
+lmers2 <- lmers2[1:16]
+
 coefs2 <- sapply(lmers2,function(lm){
   tmp <- rep(NA,100)
   names(tmp) <- paste0("cluster",1:100)
@@ -1088,22 +1106,12 @@ dev.off()
 ```
 
 ## ER-dependent HLA expression
-```{r}
-er.dep <- c(paste0("HLAABC_",c("Cancer","Mac_CD68","Mac_CD163","Mac_CD68_CD163","NK","B")),
-  paste0("HLADPB1_",c("Mac_CD68","Mac_CD163","Mac_CD68_CD163")))
-
-tpos <- c("CD8T","CD4T_nonTreg","CD4T_Treg","Mac_CD163","Mac_CD68_CD163")
-mac.subs <- c("Mac_CD68","Mac_CD163","Mac_CD68_CD163")
-
-abc <- paste0("HLAABC_",mac.subs)
-dpb1 <- paste0("HLADPB1_",mac.subs) 
-```
 
 ### [Fig 6J] per-cell type exp + cell types
 ```{r}
 cors.int.sp <- cor(coefs2,use="pairwise.complete.obs",method="spearman")
-pr.n <- c(1,12,3,4)
-par.types <- cbind(protein=rep(c(brewer.pal(7,"Set1")[c(2,1,3,4)]),c(pr.n)),
+pr.n <- c(1,12,3,4)[1:3]
+par.types <- cbind(protein=rep(c(brewer.pal(7,"Set1")[c(2,1,3,4)])[1:3],c(pr.n)),
                    `ER-dep`=c("white","brown4")[c(colnames(cors.int.sp) %in% er.dep)+1])
 
 fn <- paste0("co-occurence_spearman_w_proteins_per_ct.pdf")
@@ -1120,7 +1128,7 @@ dev.off()
 hla <- cors.int.sp["ERa_Cancer",grepl("^HLA",colnames(cors.int.sp))]
 is.erdep <- names(hla) %in% er.dep
 
-p.val <- t.test(hla ~ is.erdep,alternative="greater")$p.value # 3.7e-3
+p.val <- t.test(hla ~ is.erdep,alternative="greater")$p.value # 7.9e-5
 
 df.cn.hla.erd <- data.frame(SCC=hla,class=c("ER-indep","ER-dep")[is.erdep+1]) %>%
   mutate(class=factor(class,levels=c("ER-dep","ER-indep"))) %>%
@@ -1135,7 +1143,7 @@ p.erd <- ggplot(df.cn.hla.erd,aes(x=class,y=SCC)) +
   geom_jitter(width=0.1,aes(color=protein)) +
   geom_text_repel(aes(label=cell_type),position=position_jitter(width=0.1)) +
   theme_minimal() +
-  ggtitle(paste0("SCC between HLA and ERa expression\n(p-value: 3.7e-3)")) +
+  ggtitle(paste0("SCC between HLA and ERa expression\n(p-value: ",signif(p.val,2),")")) + 
   ylab("SCC with ERa expression in cancer cells") +
   xlab("")
 
@@ -1146,7 +1154,7 @@ dev.off()
 
 ## Per-cell type and per-sample expression
 ```{r}
-used.abs <- c("ERa","HLAABC","HLADPB1","PD1")
+used.abs <- c("ERa","HLAABC","HLADPB1","PD1")[1:3]
 df.cn5 <- df.cn.t %>%
   select(smpl,cell_types,!!!syms(used.abs)) %>%
   group_by(smpl,cell_types) %>%

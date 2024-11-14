@@ -226,7 +226,7 @@ dev.off()
 ### [Fig 2C?] heatmap for ERS?
 ```{r}
 exp.cols <- viridis(100)
-pdf(file.path(fig_dir1,"mod_activity","esr1_heatmap.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"mod_activity","esr1_heatmap_v2.pdf"),width=7,height=7)
 h3(esr1[o1,],scale="none",Colv=NA,Rowv=NA,margins=c(7,5),RowSideColors = st.cols[o1],
    main="ESR1 expression",col=exp.cols)
 dev.off()
@@ -241,6 +241,7 @@ pdf(file.path(fig_dir1,"gene_activity","heatmap_253_mod_gene_exp-ptrn.pdf"),widt
 h <- heatmap3(cor.all.gns,balanceCol=TRUE,scale="none",
          ColSideColors=mod.side.cols,RowSideColors=mod.side.cols)
 dev.off()
+h.ri <- h$rowInd
 ```
 
 
@@ -261,9 +262,11 @@ if(0){
     return(tmp)
   })) # 253 x 11 - scaled between 0 and 1
   
-  saveRDS(exp.gn.by.ct,file.path(obj_dir1,"mod_exp_by_ct.rds"))
+  saveRDS(exp.gn.by.ct,file.path(obj_dir1,"mod_exp_by_ct_norm.rds"))
+  saveRDS(exp.gn.by.ct.1,file.path(obj_dir1,"mod_exp_by_ct_raw.rds"))  
 }else{
-  exp.gn.by.ct <-readRDS(file.path(obj_dir1,"mod_exp_by_ct.rds"))  
+  exp.gn.by.ct <-readRDS(file.path(obj_dir1,"mod_exp_by_ct_norm.rds"))  
+  exp.gn.by.ct.1 <-readRDS(file.path(obj_dir1,"mod_exp_by_ct_raw.rds"))    
 }
 
 if(0){
@@ -283,26 +286,6 @@ if(0){
 }
 ```
 
-### expression of PD1/PDL1 in DC
-```{r}
-  cts1 <- wp$celltype_2
-  is.dc <- cts1 == "Dendritic"
-
-  mat.dc <- mat[,is.dc]
-  smpls.dc <- factor(smpls[is.dc],levels=(df.pts %>% arrange(desc(ERS)) %>% pull(old)))
-
-  dc.exp.by.smpl <- t(sapply(c("CD274","PDCD1"),function(gn){
-    x <- mat.dc[gn,]
-    tmp <- tapply(x,smpls.dc,mean,na.rm=T)
-    # tmp <- tmp/max(tmp,na.rm=T)
-    return(tmp)
-  })) # 253 x 34 (pts)
-  
-  rownames(exp.gn.by.smpl) <- mod.gns
-  cols <- brewer.pal(3,"Set1")[as.numeric(df.pts$subtype)]
-  plot(tmp,main="PDL1 in dendritic cells",ylab="PD-L1 expression",xlab="low ERS <- patient index -> high ERS",col=cols,pch=19)
-  legend("topright",pch=19,c("HR+","HER2+","TNBC"),col=brewer.pal(3,"Set1"))
-```
 
 ### [Fig. S5A -> 2E middle/right] heatmap relative expression among cell types for each gene
 
@@ -315,7 +298,7 @@ xh <- h3(exp.gn.by.ct[h.ri,],scale="none",
 dev.off()
 ```
 
-#### per sample - done after reordering samples based on ERS scores
+#### per sample - done around line L507 (after reordering samples based on ERS scores)
 ```{r}
 # done later in this script
 ```
@@ -333,6 +316,7 @@ names(max.tis) <- rownames(exp.gn.by.ct)
 mods.v <- rep(names(mods),sapply(mods,length))
 names(mods.v) <- mod.gns
 
+cut10 <- cutree(h$hcr,k=10)
 df.tum.exp <- data.frame(genes=names(tum.exp),
                          tum.exp=tum.exp,
                          tum.exp.1=tum.exp.1,
@@ -377,20 +361,20 @@ xh <- h3(exp.gn.by.ct[h.ri,],scale="none",
      RowSideColors=mod.side.cols,col=viridis_pal()(200),
      Colv=NA,
      distfunR=dist)
-hc <- xh$hcr
+hc <- h$hcr
 mem <- cutree(hc,k=n.clusts)
-mem <- mem[xh$rowInd]
+mem <- mem[h.ri]
 mem <- factor(mem,levels=rev(unique(mem)))
 
 lst.gns.by.exp.cts <- tapply(names(mem),mem,identity)
 names(lst.gns.by.exp.cts) <- seq(lst.gns.by.exp.cts)
 
-lst.gns.by.cor <- tapply(df.tum.exp$genes,df.tum.exp$celltype,identity)
+# lst.gns.by.cor <- tapply(df.tum.exp$genes,df.tum.exp$celltype,identity)
 
-th1 <- 0.7 # th to consider if each celltype expresses`each gene` 
-th2 <- 0.3 # th to consider if each celltype expresses `this cluster of genes`
+th1 <- 0.8 # th to consider if each celltype expresses`each gene` 
+th2 <- 0.2 # th to consider if each celltype expresses `this cluster of genes`
 
-ct.exp <- lapply(lst.gns.by.cor,function(x){
+ct.exp <- lapply(lst.gns.by.exp.cts,function(x){
   tmp <- exp.gn.by.ct[x,]
   oc <- order(colMeans(tmp),decreasing=T)
   tmp <- tmp[,oc]
@@ -405,7 +389,7 @@ ct.exp <- lapply(lst.gns.by.cor,function(x){
   return(this.cts)
 })
 
-rev(ct.exp)
+ct.exp
 
 ```
 
@@ -445,6 +429,7 @@ nms.mods <- names(mods)[1:4]
 
 used.cts <- names(lst.mean.mods$ERS)
 nms.mods <- names(lst.mean.mods)
+
 for(nm in nms.mods){
   mean.pt.ct <- lst.mean.mods[[nm]]
 
@@ -491,13 +476,9 @@ for(nm in nms.mods){
   coef.cts[[nm]] <- this.ct
 }
 
-if(1){
-  coef.cts.1 <- as.data.frame(exp(do.call(cbind,coef.cts)))
-  coef.pts.1 <- as.data.frame(exp(do.call(cbind,coef.pts)))
-}else{
-  coef.cts.1 <- as.data.frame(do.call(cbind,coef.cts))
-  coef.pts.1 <- as.data.frame(do.call(cbind,coef.pts))
-}
+coef.cts.1 <- as.data.frame(exp(do.call(cbind,coef.cts)))
+coef.pts.1 <- as.data.frame(exp(do.call(cbind,coef.pts)))
+
 rownames(coef.pts.1) <- sub("^pt","",rownames(coef.pts.1))
 ```
 
@@ -512,8 +493,7 @@ df.pts <- subtypes %>%
   left_join(df.ers,by="old") %>% 
   arrange(desc(ERS))  %>% 
   mutate(old=as.numeric(old)) %>%
-  mutate(new=paste0("we",seq(nrow(df.ers)))) %>%
-  arrange(old)
+  mutate(new=paste0("we",seq(nrow(df.ers))))# %>%
 
 rownames(df.pts) <- c()
 
@@ -525,13 +505,13 @@ levels(pts1) <- df.pts$new
 ```{r}
 new.ids <- sc1 <- df.pts$new
 names(new.ids) <- df.pts$old
+exp.gn.by.smpl <- exp.gn.by.smpl[,df.pts$old]
 colnames(exp.gn.by.smpl) <- df.pts$new
-o.smpls <- order(as.numeric(sub("we","",colnames(exp.gn.by.smpl))))
 
 pdf(file.path(fig_dir1,"gene_activity",
               paste0("heatmap_spml_expression_all.pdf")),width=7,height=7)
-xh <- h3(exp.gn.by.smpl[h.ri,o.smpls],scale="none",
-     RowSideColors=mod.side.cols[h.ri,],ColSideColors=st.cols[o.smpls],
+xh <- h3(exp.gn.by.smpl[h.ri,],scale="none",
+     RowSideColors=mod.side.cols[h.ri,],ColSideColors=st.cols,
      col=viridis_pal()(200),Rowv=NA,Colv=NA)
 dev.off()
 
@@ -564,7 +544,7 @@ for(nm in nms.mods){
      RowSideColors = cbind(subtype=st.cols))
   mtext(paste0("Activity of ",nm," module\n(No scaling)"),side=3,line=0,cex=2)
   dev.off()
-}  
+}
 ```
 
 #### [Fig. 2D] heatmap - patient and cell type level activities
@@ -580,7 +560,7 @@ dev.off()
 st.cols <- cbind(subtype=st.uniq.cols[as.numeric(factor(st.smpls[df.pts$old],
                                                       levels=c("HR+","HER2+","TNBC")))])
 
-mat.pts <- as.matrix(df.pts[3:6])
+mat.pts <- as.matrix(df.pts[4:7])
 rownames(mat.pts) <- as.character(df.pts$new)
 
 pdf(file.path(fig_dir1,"mod_activity","coef_pts_raw.pdf"),width=7,height=7)

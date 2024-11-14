@@ -41,20 +41,22 @@ suppressPackageStartupMessages({
   library(data.table)
   library(CycifAnalyzeR)
 })
-source(file.path(src_dir,"cycif_utils.R"))
+source(file.path(src_dir,"utils","cycif_utils.R"))
 ```
+
 ### Set up paths
 ```{r}
 obj_dir1 <- file.path(obj_dir,"DFBCC_cycif")
 fig_dir1 <- file.path(fig_dir,"18_DFBCC_cycif_analysis_1")
-dir.creates(fig_dir1,"distance")
-dir.creates(fig_dir1,"cn_frnn")
+if(!dir.exists(file.path(fig_dir1,"distance"))){dir.create(file.path(fig_dir1,"distance"))}
+if(!dir.exists(file.path(fig_dir1,"cn_frnn"))){dir.create(file.path(fig_dir1,"cn_frnn"))}
 ```
 
 ### Load `cs1`
 ```{r define cell types} 
 cs1 <- readRDS(file=file.path(obj_dir1,"cs.rds"))
 ```
+
 ### Module activity `df.gs`
 ```{r}
 # cor(m,m) # column-wise comparison
@@ -118,7 +120,7 @@ if(0){ # run this once
 }else{ # from next time, you can load the saved objects
   lst.frnn <- list()
   for(nm in nms){
-    lst.frnn[[nm]] <- readRDS(file.path(obj_dir1,"cn_frnn",paste0("cn_frnn_",nm,".rds")))
+    lst.frnn[[nm]] <- readRDS(file.path(obj_dir1,"cn","cn_frnn",paste0("cn_frnn_",nm,".rds")))
   }
 }
 ```
@@ -183,9 +185,6 @@ barplot(freq.ts,las=2,main="# of cancer and non-cancer cells inside and outside\
 legend(par()$usr[2],par()$usr[4],c("cancer in core","cancer in stroma","non-cancer in core","non-cancer in stroma"),
        fill=cols,bty="n",xpd=NA)
 dev.off()
-
-
-##
 ```
 
 ### [Fig 5C] ERS activity vs ratio of non-cancer cells within tumor region
@@ -746,7 +745,7 @@ cluster_assignments <- as.numeric(factor(cluster_assignments0,levels=o))
 if(0){
   saveRDS(cluster_assignments,file.path(obj_dir1,"cluster_assignments_kmeans_all.rds"))
 }else{
-  cluster_assignments <- readRDS(file.path(obj_dir1,"cluster_assignments_kmeans_all.rds"))
+  cluster_assignments <- readRDS(file.path(obj_dir1,"cn","cluster_assignments_kmeans_all.rds"))
 }
 ```
 
@@ -918,7 +917,7 @@ p2 <- ggplot(r5.2,aes(x=d1,y=N_T_cells,color=cell_types)) +
     geom_vline(xintercept=0,col=1) +
     geom_vline(xintercept=500,col=1,linetype=2) +  
     geom_hline(yintercept=0,col=1) +    
-    geom_line(size=2) +
+    geom_line(linewidth=2) +
     xlab("Distance from tumor border (µm)") +
     ylab("Mean T cell density per CN at each distance") +
     ggtitle("Local T cell density and distance from tumor border") +
@@ -956,7 +955,7 @@ df.cn.t2 <- df.cn.t1 %>%
 nts <- as.integer(df.cn.t2$n.t.all)
 uniq.nt <- unique(sort(nts))
 
-# select sn0(=1000) cells per each T cell density: ids
+# select sn0(=1000) cels per each T cell density: ids
 sn0 <- 1e3
 set.seed(12345)
 
@@ -980,7 +979,8 @@ for(ct in t.subs){
 }
 
 p.vals <- sapply(lms,function(lm1)summary(lm1)$coefficient[2,4])
-legs <- paste0(c("CD8T","CD4T_nonTreg","CD4T_Treg","T_other")," (p=",signif(p.vals,2),")")
+rsqs <- sapply(lms,function(lm1)summary(lm1)$adj.r.squared)
+legs <- paste0(c("CD8T","CD4T_nonTreg","CD4T_Treg","T_other")," (R2=",signif(rsqs,2),",p=",signif(p.vals,2),")")
 legs <- sub("p=0","p<2.2e-308",legs)
 
 # dcs <- densCols(df.cn.t2.sele$n.t.48,df.cn.t2.sele$PD1.self)
@@ -990,7 +990,7 @@ gg_color_hue <- function(n) {
 }
 cols <- gg_color_hue(4)
 
-pdf(file.path(fig_dir1,"t_cell","PD1_per_distance.pdf"),width=7,height=7)
+pdf(file.path(fig_dir1,"t_cell","PD1_vs_density.pdf"),width=7,height=7)
 par(mar=c(5,5,3,3))
 smoothScatter(df.cn.t2.sele$n.t.48,df.cn.t2.sele$PD1.self,pch=20,cex=.3,
               # colramp=cols,
@@ -1015,7 +1015,7 @@ if(0){
   nms <- names(cs1)
   
   areas <- list()
-  for(nm in nms[1:2]){
+  for(nm in nms){
     cat(nm,"\n")
     areas[[nm]] <- computeArea(cs1[[nm]],dth=dth,plot=FALSE) 
   }
@@ -1023,10 +1023,30 @@ if(0){
 
   saveRDS(areas,file.path(obj_dir1,"sample_areas.rds"))
 }else{
-  areas1 <- readRDS(file.path(obj_dir1,"sample_areas.rds"))
+  areas <- readRDS(file.path(obj_dir1,"sample_areas.rds"))
 }
 
 ```
+## [Fig] Area within tumor core
+```{r}
+if(0){
+  ## compute T cell density per sample
+  nms <- names(cs1)
+  
+  core.areas <- list()
+  for(nm in nms){
+    cat(nm,"\n")
+    core.areas[[nm]] <- computeArea(cs1[[nm]],dth=dth,plot=FALSE) 
+  }
+  core.areas <- do.call(c,core.areas)
+
+  saveRDS(core.areas,file.path(obj_dir1,"sample_core_areas.rds"))
+}else{
+  core.areas <- readRDS(file.path(obj_dir1,"sample_core_areas.rds"))
+}
+
+```
+
 
 ```{r}
 tab.cts <- table(cell_types(cs1))[,t.subs]

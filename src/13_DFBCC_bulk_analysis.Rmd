@@ -70,7 +70,7 @@ sorted.smpls <- sort(names(ldf.2))
 ldf.2 <- ldf.2[sorted.smpls] # 
 ldf.3 <- ldf.2[used.gns,]
 
-x <- cor(t(ldf.3),method="pearson")
+x <- cor(t(ldf.3),method="pearson") 
 ```
 ## Correlation between genes, mean correlation per module
 
@@ -121,6 +121,7 @@ colnames(mod.side.cols)[2] <- "whole-tumor"
 pdf(file.path(fig_dir1,"heatmap_individual_genes.pdf"),width=7,height=7)
 hc.m <- heatmap3(x1,scale="none",#col=cols,
           ColSideColors=mod.side.cols,
+          RowSideColors=mod.side.cols,
           balanceColor = TRUE,
           # Colv=NA,Rowv=NA,
           main="29 HR+ samples from DFCI (bulk RNA-seq)")
@@ -144,7 +145,8 @@ uc <- cbind(subclass=c("steelblue","#7FC97F","#FDC086","#BEAED4"))
 pdf(file.path(fig_dir1,"heatmap_mean_genes.pdf"),width=7,height=7)
 hc.mean.m <- heatmap3(mean.hrs,col=cols1,scale="none",
                  Colv=NA,Rowv=NA,
-                 ColSideColors=uc,RowSideColors=uc,
+                 ColSideColors=uc,
+                 RowSideColors=uc,
                  balanceColor = FALSE,          
                  main="29 in-house HR+ samples (mean)")
 dev.off()
@@ -185,6 +187,23 @@ heatmap3(act1,col=viridis(200),
          main="Module expression\nper patient\n(bulk RNA-seq)")
 dev.off()
 ```
+
+```{r}
+cor.pe <- cor(act1,method="pearson")
+pdf(file.path(fig_dir1,"cor_module_dfci_bulk.pdf"),width= 7,height=7)
+heatmap3(cor.pe,
+         balanceColor=TRUE,
+         scale="none",Rowv=NA,Colv=NA,
+         cexRow=.8,margin=c(10,12),
+         ColSideColors = uc,
+         RowSideColors = uc,
+         main="Module expression\nper patient\n(bulk RNA-seq)")
+dev.off()
+
+write.csv(cor.pe,file.path(fig_dir1,"heatmap_mean_cor_modules.csv"))
+
+```
+
 
 
 ## Save data

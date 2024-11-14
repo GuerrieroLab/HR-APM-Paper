@@ -19,11 +19,11 @@ subtype_violin_within <- function(dfx,mod){
 }
 
 subtype_violin_between <- function(dfx,mod){
-  if(!mod %in% c("TNFA.NFKB", "IFN.I", "APM.TC")){
+  if(!mod %in% c("IMMUNE","TNFA.NFKB", "IFN.I", "APM.TC")){
     stop("mod should be one of the immune module names")
   }
-  mods <- paste0("IMM",1:3)
-  mod1 <- mods[match(mod,c("TNFA.NFKB", "IFN.I", "APM.TC"))]
+  mods <- paste0("IMM",c("",1:3))
+  mod1 <- mods[match(mod,c("IMMUNE","TNFA.NFKB", "IFN.I", "APM.TC"))]
   dfx1 <- dfx %>% select(-2) %>% filter(type == paste0("ERS.",mod1)) %>% unique()
   
   p0 <- ggplot(dfx %>% filter(type==paste0("ERS.",mod1)),

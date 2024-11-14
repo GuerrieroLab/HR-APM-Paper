@@ -24,20 +24,23 @@ suppressPackageStartupMessages({
   # library(fgsea)
 })
 ```
+## Set Paths
+```{r}
+obj_dir1 <- file.path(obj_dir,"celltype_markers")
+if(!dir.exists(obj_dir1))dir.create(obj_dir1)
+```
 
 ## Find cell type markers 
 
 ### DF/BCC data
 ```{r}
-wp <- readRDS(file=file.path(obj_dir,"DFBCC_sn","seurat_harmony_v2.rds"))
+wp <- readRDS(file=file.path(obj_dir,"DFBCC_sn","seurat_all.rds"))
 
-Idents(wp) <- "celltype_broad_v3"
-wp@meta.data$celltype_broad_v3 <- factor(wp@meta.data$celltype_broad_v3,
-                                       levels=c("Cancer","Fibro","Peri","Endo","Adipo","Mac","DC","Mast","T","NK","B","Plasma"))
-wp@meta.data$celltype_broad_v3 <- droplevels(wp@meta.data$celltype_broad_v3)
-wp <- subset(wp,celltype_broad_v3 %in% c("Cancer","Fibro","Peri","Endo","Adipo","Mac","DC","Mast","T","NK","B","Plasma"))
+Idents(wp) <- "celltype_broad"
+wp@meta.data$celltype_broad <- droplevels(wp@meta.data$celltype_broad)
+wp <- subset(wp,celltype_broad %in% c("Cancer","Fibro","Peri","Endo","Adipo","Mac","DC","Mast","T","NK","B","Plasma"))
 markers.d <- FindAllMarkers(wp, only.pos = TRUE, min.pct = 0.1, logfc.threshold = 0.5)
-saveRDS(markers.d,file=file.path(obj_dir,"DFBCC_sn","markers_all_dfci_102824.rds"))
+saveRDS(markers.d,file=file.path(obj_dir1,"markers_all_dfbcc.rds"))
 ```
 
 ### WEHI data
@@ -45,20 +48,18 @@ saveRDS(markers.d,file=file.path(obj_dir,"DFBCC_sn","markers_all_dfci_102824.rds
 wp <- readRDS(file.path(obj_dir,"WEHI","wehi_seurat_all_cells.rds"))
 
 Idents(wp) <- "celltype_2"
-# table(wp@meta.data$celltype_2)
-wp@meta.data$celltype_2 <- factor(wp@meta.data$celltype_2,
-                                levels=c("Cancer","Fibroblast","Pericyte","Endothelial","Mono_Mac","Dendritic","Mast","T","NK","B","Plasma"))
+
 wp@meta.data$celltype_2 <- droplevels(wp@meta.data$celltype_2)
 wp <- subset(wp, celltype_2 %in% c("Cancer","Fibroblast","Pericyte","Endothelial","Mono_Mac","Dendritic","Mast","T","NK","B","Plasma"))
 
 markers.w <- FindAllMarkers(wp, only.pos = TRUE, min.pct = 0.1, logfc.threshold = 0.5)
 
-saveRDS(markers.w,file=file.path(obj_dir,"markers_all_wehi_102824.rds"))
+saveRDS(markers.w,file=file.path(obj_dir1,"markers_all_wehi.rds"))
 ```
 
 ## Combine the markers from two datasets
 ```{r}
-markers.d <- readRDS(file=file.path(obj_dir,"DFBCC_sn","markers_all_dfci_102824.rds"))
+markers.d <- readRDS(file=file.path(obj_dir1,"markers_all_dfbcc.rds"))
 
 levels(markers.w$cluster) <- levels(markers.d$cluster)[-5]
 
@@ -105,7 +106,7 @@ markers.wd[[ct]] <- ld
 markers.wd <- do.call(rbind,markers.wd)
 
 ##
-saveRDS(markers.wd,file=file.path(obj_dir,"DFBCC_sn","markers_all_wehi_dfci_102824.rds"))
+saveRDS(markers.wd,file=file.path(obj_dir1,"markers_all_wehi_dfbcc.rds"))
 
 ##
 th <- 1e-10
@@ -115,7 +116,7 @@ table(table(m1$gene))
 table(m1$cluster)
 
 lst.wd <- tapply(m1$gene,m1$cluster,identity)
-saveRDS(lst.wd,file=file.path(obj_dir,"DFBCC_sn","list_biomarkers_102824.rds"))
+saveRDS(lst.wd,file=file.path(obj_dir1,"list_biomarkers.rds"))
 ```
 
 
