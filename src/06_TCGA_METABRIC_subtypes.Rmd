@@ -667,6 +667,9 @@ labels <- rep(c(1,-1),c(length(exp.pos),length(exp.neg)))
 pred <- prediction(predictions,labels)
 perf <- performance(pred, "tpr", "fpr")
 
+auc_perf <- ROCR::performance(pred,"auc")
+auroc <- auc_perf@y.values[[1]]
+
 th <- threshold1(predictions,labels) # threshold for ESR1
 ``` 
 
